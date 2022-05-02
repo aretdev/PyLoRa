@@ -141,7 +141,7 @@ class BOARD:
         if BOARD.LED is not None:
             GPIO.output(BOARD.LED, value)
         else:
-            print("LED is set no None")
+            raise RuntimeError("LED is set no None")
             value = -1
         return value
 
@@ -153,7 +153,7 @@ class BOARD:
         if BOARD.LED is not None:
             GPIO.output(BOARD.LED, value)
         else:
-            print("LED is set no None")
+            raise RuntimeError("LED is set no None")
             value = -1
         return value
 
@@ -174,7 +174,7 @@ class BOARD:
         :return: value
         """
         if BOARD.NSS is not None:
-            GPIO.output(BOARD.NSS, value == False)
+            GPIO.output(BOARD.NSS, not(value))
         return value
 
     @staticmethod
