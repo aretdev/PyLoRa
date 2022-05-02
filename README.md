@@ -16,4 +16,4 @@ This is a fork of the original PySX127x but adapted to v1.4 instead of 1.0
   0x01 = 0000 0001 \
   0x81 = 1000 0001 -> we are on write mode!   
 
-  for more information about this chip you can visit : https://www.mouser.com/datasheet/2/761/sx1272-1277619.pdf
+  for more information about this chip you can visit : https://cdn-shop.adafruit.com/product-files/3179/sx1276_77_78_79.pdf

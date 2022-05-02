@@ -997,6 +997,10 @@ class LoRa(object):
         return result_list
 
     def get_register(self, register_address):
+        """ Returns the value of the register
+            we mask the address with 0x7F because we are on read mode -> MSB = 0
+        :return: Value of the register
+        """
         BOARD.chip_select(True)
         v = self.spi.xfer([register_address & 0x7F, 0])[1]
         BOARD.chip_select(False)
