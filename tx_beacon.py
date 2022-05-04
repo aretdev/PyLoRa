@@ -39,8 +39,8 @@ class LoRaBeacon(LoRa):
 
     tx_counter = 0
 
-    def __init__(self, verbose=False):
-        super(LoRaBeacon, self).__init__(verbose)
+    def __init__(self, verbose=False, sf=7):
+        super(LoRaBeacon, self).__init__(verbose,sf)
         self.set_mode(MODE.SLEEP)
         self.set_dio_mapping([1,0,0,0,0,0])
 
@@ -93,9 +93,10 @@ class LoRaBeacon(LoRa):
         self.write_payload([0x0f])
         self.set_mode(MODE.TX)
         while True:
+            print("waiting, going to sleep 1")
             sleep(1)
 
-lora = LoRaBeacon(verbose=False)
+lora = LoRaBeacon(verbose=False,sf=12)
 args = parser.parse_args(lora)
 
 lora.set_pa_config(pa_select=1)

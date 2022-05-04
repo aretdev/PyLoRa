@@ -39,14 +39,12 @@ class LoRaRcvCont(LoRa):
         self.set_dio_mapping([0] * 6)
 
     def on_rx_done(self):
-        BOARD.led_on()
         print("\nRxDone")
         self.clear_irq_flags(RxDone=1)
         payload = self.read_payload(nocheck=True)
         print(bytes(payload).decode())
         self.set_mode(MODE.SLEEP)
         self.reset_ptr_rx()
-        BOARD.led_off()
         self.set_mode(MODE.RXCONT)
 
     def on_tx_done(self):
