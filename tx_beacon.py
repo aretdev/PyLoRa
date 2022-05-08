@@ -63,7 +63,7 @@ class LoRaBeacon(LoRa):
             print
             sys.exit(0)
         sleep(args.wait)
-        self.write_payload([0x0f])
+        self.write_payload(["h"])
         self.set_mode(MODE.TX)
 
     def on_cad_done(self):
@@ -90,7 +90,7 @@ class LoRaBeacon(LoRa):
         global args
         sys.stdout.write("\rstart")
         self.tx_counter = 0
-        self.write_payload([0x0f])
+        self.write_payload([0x0f, 2])
         self.set_mode(MODE.TX)
         while True:
             print("waiting, going to sleep 1")
