@@ -88,7 +88,7 @@ class LoRa(object):
     verbose = True
     dio_mapping = [None] * 6          # store the dio mapping here
 
-    def __init__(self, verbose=True, do_calibration=True, calibration_freq=868,sf=7, cr=CODING_RATE.CR4_5, freq=868):
+    def __init__(self, verbose=True, do_calibration=True, calibration_freq=868,sf=7, cr=CODING_RATE.CR4_5, freq=868, sync_word=0x34, rx_crc=False):
         """ Init the object
 
         Send the device to sleep, read all registers, and do the calibration (if do_calibration=True)
@@ -97,7 +97,6 @@ class LoRa(object):
         :param do_calibration: Call rx_chain_calibration, default is True.
         """
         self.freq = freq
-        print(freq)
         self.verbose = verbose
         # set the callbacks for DIO0..5 IRQs.
         BOARD.add_events(self._dio0, self._dio1, self._dio2, self._dio3, self._dio4, self._dio5)
@@ -131,6 +130,9 @@ class LoRa(object):
         self.set_coding_rate(cr)
         self.set_freq(freq)
         self.set_spreading_factor(sf)
+        self.set_sync_word(sync_word)
+        self.set_rx_crc(rx_crc)
+
         # set the dio_ mapping by calling the two get_dio_mapping_* functions
         self.get_dio_mapping_1()
         self.get_dio_mapping_2()
