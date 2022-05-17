@@ -37,13 +37,8 @@ class BOARD:
     """
     # Note that the BCOM numbering for the GPIOs is used.
     DIO0 = 4        # RaspPi GPIO 4
-    DIO1 = None     # Not necessary, we could still using them if we wanted to
-    DIO2 = None     # Not necessary, we could still using them if we wanted to
-    DIO3 = None     # Not necessary, we could still using them if we wanted to
     NSS = 25        # RasPi GPIO25, connection required!
     RST = 17        # Raspi GPIO17, this is not really required
-    LED = None      # Dragino Raspberry PI hat (no onboard led)
-    SWITCH = None   # No switch
 
     # The spi object is kept here
     spi = None
@@ -65,26 +60,16 @@ class BOARD:
         GPIO.setwarnings(False)
 
         # LED, RST & NSS
-        if BOARD.LED is not None:
-            GPIO.setup(BOARD.LED, GPIO.OUT)
-
         GPIO.setup(BOARD.RST, GPIO.OUT)
         GPIO.setup(BOARD.NSS, GPIO.OUT)
-        if BOARD.LED is not None:
-            GPIO.output(BOARD.LED, 0)
 
         GPIO.output(BOARD.RST, 0)
         time.sleep(.01)
         GPIO.output(BOARD.RST, 1)
         time.sleep(.01)
         GPIO.output(BOARD.NSS, 1)
-        # switch
-        if BOARD.SWITCH is not None:
-            GPIO.setup(BOARD.SWITCH, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         # DIOx
-        for gpio_pin in [BOARD.DIO0, BOARD.DIO1, BOARD.DIO2, BOARD.DIO3]:
-            if gpio_pin is not None:
-                GPIO.setup(gpio_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+        GPIO.setup(BOARD.DIO0, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
     @staticmethod
     def teardown():
@@ -118,44 +103,9 @@ class BOARD:
         GPIO.add_event_detect(dio_number, GPIO.RISING, callback=callback)
 
     @staticmethod
-    def add_events(cb_dio0, cb_dio1, cb_dio2, cb_dio3, cb_dio4, cb_dio5, switch_cb=None):
+    def add_events(cb_dio0):
         if BOARD.DIO0 is not None:
             BOARD.add_event_detect(BOARD.DIO0, callback=cb_dio0)
-        if BOARD.DIO1 is not None:
-            BOARD.add_event_detect(BOARD.DIO1, callback=cb_dio1)
-        if BOARD.DIO2 is not None:
-            BOARD.add_event_detect(BOARD.DIO2, callback=cb_dio2)
-        if BOARD.DIO3 is not None:
-            BOARD.add_event_detect(BOARD.DIO3, callback=cb_dio3)
-        # the modtronix inAir9B does not expose DIO4 and DIO5
-        if (switch_cb is not None) and (BOARD.SWITCH is not None):
-            GPIO.add_event_detect(BOARD.SWITCH, GPIO.RISING, callback=switch_cb, bouncetime=300)
-
-    @staticmethod
-    def led_on(value=1):
-        """ Switch the proto shields LED
-        :param value: 0/1 for off/on. Default is 1.
-        :return: value
-        :rtype : int
-        """
-        if BOARD.LED is not None:
-            GPIO.output(BOARD.LED, value)
-        else:
-            raise RuntimeError("LED is set no None")
-            value = -1
-        return value
-
-    @staticmethod
-    def led_off(value=0):
-        """ Switch LED off
-        :return: 0
-        """
-        if BOARD.LED is not None:
-            GPIO.output(BOARD.LED, value)
-        else:
-            raise RuntimeError("LED is set no None")
-            value = -1
-        return value
 
     @staticmethod
     def reset():
@@ -177,17 +127,3 @@ class BOARD:
             GPIO.output(BOARD.NSS, not(value))
         return value
 
-    @staticmethod
-    def blink(time_sec, n_blink):
-        if BOARD.LED is not None:
-            if n_blink == 0:
-                return
-            BOARD.led_on()
-            for i in range(n_blink):
-                time.sleep(time_sec)
-                BOARD.led_off()
-                time.sleep(time_sec)
-                BOARD.led_on()
-            BOARD.led_off()
-        else:
-            print("LED is set no None")

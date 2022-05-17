@@ -23,6 +23,7 @@
 
 
 import sys
+from array import array
 from time import sleep
 from SX127x.LoRa import *
 from SX127x.LoRaArgumentParser import LoRaArgumentParser
@@ -39,8 +40,8 @@ class LoRaBeacon(LoRa):
 
     tx_counter = 0
 
-    def __init__(self, verbose=False, sf=7):
-        super(LoRaBeacon, self).__init__(verbose,sf)
+    def __init__(self, verbose=False):
+        super(LoRaBeacon, self).__init__(verbose)
         self.set_mode(MODE.SLEEP)
         self.set_dio_mapping([1,0,0,0,0,0])
 
@@ -63,7 +64,10 @@ class LoRaBeacon(LoRa):
             print
             sys.exit(0)
         sleep(args.wait)
-        self.write_payload(["h"])
+        message = "Hello > %d" % self.tx_counter
+        sys.stdout.write(", %s" % message)
+        payload = array('b', message)
+        self.write_payload(list(payload))
         self.set_mode(MODE.TX)
 
     def on_cad_done(self):
@@ -88,27 +92,30 @@ class LoRaBeacon(LoRa):
 
     def start(self):
         global args
-        sys.stdout.write("\rstart")
-        self.tx_counter = 0
-        self.write_payload([0x0f, 2])
+        sys.stdout.write("\rStart")
+        self.tx_counter = 1
+        sys.stdout.write("\rtx #%d" % self.tx_counter)
+        message = "Hello > %d" % self.tx_counter
+        sys.stdout.write(", %s" % message)
+        payload = array('b', message)
+        self.write_payload(list(payload))
         self.set_mode(MODE.TX)
         while True:
-            print("waiting, going to sleep 1")
             sleep(1)
 
-lora = LoRaBeacon(verbose=False,sf=12)
+lora = LoRaBeacon(verbose=False)
 args = parser.parse_args(lora)
 
 lora.set_pa_config(pa_select=1)
-#lora.set_rx_crc(True)
+lora.set_rx_crc(True)
 #lora.set_agc_auto_on(True)
 #lora.set_lna_gain(GAIN.NOT_USED)
-#lora.set_coding_rate(CODING_RATE.CR4_6)
 #lora.set_implicit_header_mode(False)
 #lora.set_pa_config(max_power=0x04, output_power=0x0F)
 #lora.set_pa_config(max_power=0x04, output_power=0b01000000)
 #lora.set_low_data_rate_optim(True)
-#lora.set_pa_ramp(PA_RAMP.RAMP_50_us)
+#lora.set_pa_ramp(PA_RAMP.RAMP_v50_us)
+lora.set_sync_word(0x34)
 
 
 print(lora)
