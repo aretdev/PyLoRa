@@ -22,6 +22,7 @@
 
 
 import sys
+import time
 from .constants import *
 from .board_config import BOARD
 
@@ -82,7 +83,7 @@ def setter(register_address):
 
 class LoRa(object):
 
-    tx_ready = 0
+    blocking = False
     spi = BOARD.SpiDev()              # init and get the baord's SPI
     mode = None                       # the mode is backed up here
     backup_registers = []
@@ -100,8 +101,6 @@ class LoRa(object):
         self.payload = ""
         self.freq = freq
         self.verbose = verbose
-        # set the callbacks for DIO0 IRQs.
-        BOARD.add_events(self._dio0)
 
         # set mode to sleep and read all registers
         self.set_mode(MODE.SLEEP)
@@ -147,10 +146,11 @@ class LoRa(object):
         self.payload = self.read_payload(nocheck=True)
         self.reset_ptr_rx()  # we clear pointer
         self.set_mode(MODE.RXCONT)
+        self.blocking = False
 
     def on_tx_done(self):
         self.clear_irq_flags(TxDone=1)  # clear txdone IRQ flag
-        self.tx_ready = 0  # I'm ready to transmit again!
+        self.blocking = False
 
     def on_cad_done(self):
         pass
@@ -167,7 +167,7 @@ class LoRa(object):
     def on_fhss_change_channel(self):
         pass
 
-    # Internal callbacks for add_events()
+    # Internal callbacks for DIO0
 
     def _dio0(self, channel):
         # DIO0 00: RxDone
@@ -210,20 +210,37 @@ class LoRa(object):
         return v
 
     def recv(self):
+        """ Util Method for recv
+            It will turn automatically the device on receive mode
+        """
+        if self.blocking:
+            time.sleep(0.1)
+        BOARD.add_event_dio0(self._dio0)
+        self.blocking = True
         self.set_mode(MODE.SLEEP)
         self.set_dio_mapping(0)
         self.reset_ptr_rx()
         self.set_mode(MODE.RXCONT)
 
+    def set_timeout(self, value):
+        """ set timeout for operations
+            After we determine if we want to send or receive, we need to specify a timeout
+        """
+        res = BOARD.settimeout(value, callback=self._dio0)
+        return res
+
     def send(self, content):
-        if not self.tx_ready:
-            self.set_mode(MODE.SLEEP)
-            self.set_dio_mapping(1)  # DIO0 = 1 is for TXDone, transmitting mode basically
-            self.set_mode(MODE.STDBY)
-            formatted = list(content.encode('ascii'))
-            self.write_payload(formatted)  # I send my payload to LORA SX1276 interface
-            self.set_mode(MODE.TX)  # I enter on TX Mode
-            self.tx_ready = 1   # Also, im not ready to tx again until the current tx is done
+        if self.blocking:
+            time.sleep(0.1)
+
+        BOARD.add_event_dio0(self._dio0)
+        self.blocking = True
+        self.set_mode(MODE.SLEEP)
+        self.set_dio_mapping(1)  # DIO0 = 1 is for TXDone, transmitting mode basically
+        self.set_mode(MODE.STDBY)
+        formatted = list(content.encode('ascii'))
+        self.write_payload(formatted)  # I send my payload to LORA SX1276 interface
+        self.set_mode(MODE.TX)  # I enter on TX Mode
 
     def write_payload(self, payload):
         """ Get FIFO ready for TX: Set FifoAddrPtr to FifoTxBaseAddr. The transceiver is put into STDBY mode.
@@ -232,12 +249,9 @@ class LoRa(object):
         """
         payload_size = len(payload)
         self.set_payload_length(payload_size)
-
         self.set_mode(MODE.STDBY)
         base_addr = self.get_fifo_tx_base_addr()
-        print(self.get_fifo_addr_ptr())
         self.set_fifo_addr_ptr(base_addr)
-        print(self.get_fifo_addr_ptr())
         BOARD.chip_select(True)
         v = self.spi.xfer([REG.LORA.FIFO | 0x80] + payload)[1:]
         BOARD.chip_select(False)
@@ -834,7 +848,7 @@ class LoRa(object):
 
     @setter(REG.LORA.DIO_MAPPING_1)
     def set_dio_mapping_1(self, mapping):
-        """ Set mapping of pins DIO0 to DIO3. Object variable dio_mapping will be set.
+        """ Set mapping of pins DIO0  Object variable dio_mapping will be set.
         :param mapping: Register value
         :type mapping: int
         :return: New value of the register

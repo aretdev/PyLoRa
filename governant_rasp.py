@@ -1,6 +1,7 @@
 from SX127x.LoRa import *
 from SX127x.board_config import BOARD
 from time import sleep
+import socket
 
 BOARD.setup()
 
@@ -17,15 +18,14 @@ class GobernantBerry(LoRa):
 
     def start(self):
         sys.stdout.write("\rstart\n")
-        self.send("I")
-        sleep(0.1)
         self.recv()
-        while True:
-            sleep(1)
+        self.set_timeout(10000)
+        self.send("Adios")
+
 
 
 lora = GobernantBerry(verbose=False)
 print(lora)
-
+s = socket.socket()
 lora.set_pa_config(pa_select=1)
 lora.start()

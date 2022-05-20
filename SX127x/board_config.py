@@ -103,9 +103,10 @@ class BOARD:
         GPIO.add_event_detect(dio_number, GPIO.RISING, callback=callback)
 
     @staticmethod
-    def add_events(cb_dio0):
+    def add_event_dio0(cb_dio0):
         if BOARD.DIO0 is not None:
-            BOARD.add_event_detect(BOARD.DIO0, callback=cb_dio0)
+            GPIO.remove_event_detect(BOARD.DIO0)
+            GPIO.add_event_detect(BOARD.DIO0, GPIO.RISING, callback=cb_dio0)
 
     @staticmethod
     def reset():
@@ -126,4 +127,15 @@ class BOARD:
         if BOARD.NSS is not None:
             GPIO.output(BOARD.NSS, not(value))
         return value
+
+    @staticmethod
+    def settimeout(value, callback):
+        # If we adding a timeout , we clear possible events assigned to this pin (DIO0)
+        GPIO.remove_event_detect(BOARD.DIO0)
+        chanel = GPIO.wait_for_edge(BOARD.DIO0, GPIO.RISING, timeout=value)
+        if chanel is None:
+            raise TimeoutError("DIO0 wasnt activated! expcetion thrown")
+        else:
+            callback(None)
+        return chanel
 
