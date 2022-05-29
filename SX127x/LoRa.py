@@ -238,7 +238,7 @@ class LoRa(object):
         self.set_mode(MODE.SLEEP)
         self.set_dio_mapping(1)  # DIO0 = 1 is for TXDone, transmitting mode basically
         self.set_mode(MODE.STDBY)
-        formatted = list(content.encode('ascii'))
+        formatted = list(content)
         self.write_payload(formatted)  # I send my payload to LORA SX1276 interface
         self.set_mode(MODE.TX)  # I enter on TX Mode
 
