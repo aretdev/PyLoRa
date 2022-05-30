@@ -191,6 +191,6 @@ class CTPLoraEndPoint:
                 break
 
     def sendit(self, content):
-        msg = "PedazoTetardasPacket"
+        msg = "test"
         msg = str.encode(msg)
         self._send(msg, self.lora, self.my_addr, self.ANY_ADDR)
