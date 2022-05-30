@@ -1,4 +1,7 @@
+import time
+
 from loractp import CTPLoraEndPoint
 
-ctp = CTPLoraEndPoint(verbose=True)
-ctp.sendit("")
+ctp = CTPLoraEndPoint(DEBUG=True)
+
+ctp.sendit("e")
