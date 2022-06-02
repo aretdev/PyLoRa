@@ -9,11 +9,9 @@ import hashlib
 import socket
 import getmac
 
-from SX127x.LoRa import LoRa
-from SX127x.board_config import BOARD
-from SX127x.constants import CODING_RATE, MODE
+import SX127x
 
-BOARD.setup()
+SX127x.BOARD.setup()
 
 
 class CTPLoraEndPoint:
@@ -37,14 +35,14 @@ class CTPLoraEndPoint:
 
         self.DEBUG = DEBUG
 
-        self.lora = LoRa(verbose=False,
-                         do_calibration=True,
-                         calibration_freq=868,
-                         sf=7,
-                         cr=CODING_RATE.CR4_5,
-                         freq=869)
+        self.lora = SX127x.LoRa(verbose=False,
+                                do_calibration=True,
+                                calibration_freq=868,
+                                sf=7,
+                                cr=SX127x.CODING_RATE.CR4_5,
+                                freq=869)
 
-        self.lora.set_mode(MODE.STDBY)
+        self.lora.set_mode(SX127x.MODE.STDBY)
         self.lora.set_pa_config(pa_select=1)
 
         self.lora_mac = binascii.hexlify(bytes(getmac.get_mac_address(), encoding='utf8'))
@@ -90,10 +88,10 @@ class CTPLoraEndPoint:
 
         sender_addr, destination_addr, flags, check = struct.unpack(self.HEADER_FORMAT, header)
         seqnum = self.ONE if (flags & 1) & 1 else self.ZERO
-        acknum = self.ONE if(flags >> 2) & 1 else self.ZERO
+        acknum = self.ONE if (flags >> 2) & 1 else self.ZERO
         is_last = (flags >> 4) & 1 == 1
         pkt_type = (flags >> 6) & 1 == 1
-        if(content == b''):
+        if (content == b''):
             payload = b''
         else:
             payload = content
@@ -159,17 +157,17 @@ class CTPLoraEndPoint:
 
             if self.DEBUG: print("DEBUG >> Sending packet:  ", packet)
 
-            keep_trying = 10
+            keep_trying = 3
 
             while keep_trying > 0:
 
                 try:
-                    time.sleep(10-keep_trying)
+                    time.sleep(3 - keep_trying)
                     send_time = time.time()
                     lora_obj.send(packet)
                     lora_obj.recv()
                     if self.DEBUG: print("DEBUG >> Waiting for ack...")
-                    lora_obj.set_timeout(timeout_value * 1000)
+                    lora_obj.set_timeout(timeout_value)
                     recv_time = time.time()
                     if self.DEBUG: print("DEBUG >> Ack received!")
                     ack = bytes(lora_obj.payload)
@@ -178,17 +176,57 @@ class CTPLoraEndPoint:
                     if receiver_addr == self.ANY_ADDR or receiver_addr == b'':
                         # Who sent the ACK on Any address is now the one who is going to receive packets
                         receiver_addr = ack_saddr
+
+                    if ack_is_ack and ack_acknum == seqnum and sender_addr == ack_daddr and receiver_addr == ack_saddr:
+                        stats_psent += 1
+                        # No more need to retry
+                        break
+                    else:
+                        # Received packet not valid
+                        if self.DEBUG: print("ERROR: ACK received not valid")
+
                 except TimeoutError:
                     if self.DEBUG: print("DEBUG >> ERROR! no ack received")
-            if self.DEBUG: print("DEBUG >> TRYING ATTEMPT:  ", 11 - keep_trying)
 
-            stats_psent += 1
-            stats_retrans += 1
-            keep_trying -= 1
+                if self.DEBUG: print("DEBUG >> TRYING ATTEMPT:  ", 11 - keep_trying)
 
-            if keep_trying == 0:
-                FAILED = -1
-                break
+                stats_psent += 1
+                stats_retrans += 1
+                keep_trying -= 1
+
+                if keep_trying == 0:
+                    FAILED = -1
+                    break
+
+            # If last packet or sending has failed
+            if last_pkt or (FAILED < 0): break
+
+            sample_rtt = recv_time - send_time
+
+            if estimated_rtt == -1:
+                estimated_rtt = sample_rtt
+            else:
+                estimated_rtt = estimated_rtt * 0.875 + sample_rtt * 0.125
+            dev_rtt = 0.75 * dev_rtt + 0.25 * abs(sample_rtt - estimated_rtt)
+            timeout_value = (estimated_rtt + 4 * dev_rtt)
+
+            if self.DEBUG: print("DEBUG >> setting timeout to", estimated_rtt + 4 * dev_rtt)
+
+            # Increment sequence and ack numbers
+            seqnum = (seqnum + self.ONE) % 2  # self.ONE if seqnum == self.ZERO else self.ZERO
+            acknum = (acknum + self.ONE) % 2  # self.ONE if acknum == self.ZERO else self.ZERO
+
+        if self.DEBUG: print("DEBUG >> RETURNING tsend")
+        if self.DEBUG: print("DEBUG >> Retrans: ", stats_retrans)
+
+        # KN: Enabling garbage collection
+        gc.enable()
+        gc.collect()
+        content = ""
+        blocktbs = []
+        content = []
+        packet = ""
+        return receiver_addr, stats_psent, stats_retrans, FAILED
 
     def sendit(self, content):
         msg = "test"
