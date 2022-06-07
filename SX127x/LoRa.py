@@ -83,6 +83,8 @@ def setter(register_address):
 
 class LoRa(object):
 
+
+    backupTimeout = None
     blocking = False
     spi = BOARD.SpiDev()              # init and get the baord's SPI
     mode = None                       # the mode is backed up here
@@ -215,7 +217,12 @@ class LoRa(object):
         """
         if self.blocking:
             time.sleep(0.1)
-        BOARD.add_event_dio0(self._dio0)
+
+        if BOARD.timeOutBackUp is None:
+            BOARD.add_event_dio0(self._dio0)
+        else:
+            BOARD.settimeout(BOARD.timeOutBackUp, callback=self._dio0)
+
         self.blocking = True
         self.set_mode(MODE.SLEEP)
         self.set_dio_mapping(0)
@@ -226,8 +233,8 @@ class LoRa(object):
         """ set timeout for operations
             After we determine if we want to send or receive, we need to specify a timeout
         """
-        res = BOARD.settimeout(value, callback=self._dio0)
-        return res
+        BOARD.timeOutBackUp = value * 1000
+        return BOARD.timeOutBackUp
 
     def send(self, content):
         if self.blocking:

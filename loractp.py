@@ -9,9 +9,9 @@ import hashlib
 import socket
 import getmac
 
-import SX127x
+from SX127x import board_config, constants, LoRa
 
-SX127x.BOARD.setup()
+board_config.BOARD.setup()
 
 
 class CTPLoraEndPoint:
@@ -35,14 +35,14 @@ class CTPLoraEndPoint:
 
         self.DEBUG = DEBUG
 
-        self.lora = SX127x.LoRa(verbose=False,
-                                do_calibration=True,
-                                calibration_freq=868,
-                                sf=7,
-                                cr=SX127x.CODING_RATE.CR4_5,
-                                freq=869)
+        self.lora = LoRa.LoRa(verbose=False,
+                         do_calibration=True,
+                         calibration_freq=868,
+                         sf=7,
+                         cr=constants.CODING_RATE.CR4_5,
+                         freq=869)
 
-        self.lora.set_mode(SX127x.MODE.STDBY)
+        self.lora.set_mode(constants.MODE.STDBY)
         self.lora.set_pa_config(pa_select=1)
 
         self.lora_mac = binascii.hexlify(bytes(getmac.get_mac_address(), encoding='utf8'))
@@ -91,7 +91,7 @@ class CTPLoraEndPoint:
         acknum = self.ONE if (flags >> 2) & 1 else self.ZERO
         is_last = (flags >> 4) & 1 == 1
         pkt_type = (flags >> 6) & 1 == 1
-        if (content == b''):
+        if content == b'':
             payload = b''
         else:
             payload = content
@@ -108,7 +108,7 @@ class CTPLoraEndPoint:
 
         return ha[-3:]
 
-    def _send(self, content, lora_obj, sender_addr, receiver_addr):
+    def _csend(self, content, lora_obj, sender_addr, receiver_addr):
 
         sender_addr = sender_addr[8:]
         receiver_addr = receiver_addr[8:]
@@ -166,8 +166,9 @@ class CTPLoraEndPoint:
                     send_time = time.time()
                     lora_obj.send(packet)
                     lora_obj.recv()
-                    if self.DEBUG: print("DEBUG >> Waiting for ack...")
                     lora_obj.set_timeout(timeout_value)
+                    if self.DEBUG: print("DEBUG >> Waiting for ack...")
+                    lora_obj.recv()
                     recv_time = time.time()
                     if self.DEBUG: print("DEBUG >> Ack received!")
                     ack = bytes(lora_obj.payload)
@@ -228,7 +229,108 @@ class CTPLoraEndPoint:
         packet = ""
         return receiver_addr, stats_psent, stats_retrans, FAILED
 
-    def sendit(self, content):
-        msg = "test"
-        msg = str.encode(msg)
-        self._send(msg, self.lora, self.my_addr, self.ANY_ADDR)
+    def _crecv(self, lora_obj, my_addr, send_addr):
+        my_addr = my_addr[8:]
+        snd_addr = send_addr[8:]
+        if self.DEBUG: print("DEBUG >> my_addr, snd_addr: ", my_addr, snd_addr)
+        if self.DEBUG: print("DEBUG >> my_addr, snd_addr: ", my_addr, snd_addr)
+
+        # Buffer storing the received data to be returned
+        rcvd_data = b''
+        last_check = 0
+
+        next_acknum = self.ONE
+        lora_obj.set_timeout(5)
+
+        if (snd_addr == self.ANY_ADDR) or (snd_addr == b''): SENDER_ADDR_KNOWN = False
+        self.p_resend = 0  ###
+
+        # Enabling garbage collection
+        gc.enable()
+        gc.collect()
+
+        while True:
+            try:
+                packet = lora_obj.recv(self.MAX_PKT_SIZE)
+                if self.DEBUG: print("DEBUG >> packet received: ", packet)
+                inp_src_addr, inp_dst_addr, inp_seqnum, inp_acknum, is_ack, last_pkt, check, content = self.__unpack(
+                    packet)
+                # getting sender address, if unknown, with the first packet
+                if not SENDER_ADDR_KNOWN:
+                    snd_addr = inp_src_addr
+                    SENDER_ID_KNOWN = True
+                # Checking if a "valid" packet... i.e., either for me or broadcast
+                if (inp_dst_addr != my_addr) and (inp_dst_addr != self.ANY_ADDR):
+                    if self.DEBUG: print("DEBUG >> DISCARDED received packet not for me!!")
+                    continue
+            except socket.timeout:
+                if self.DEBUG: print("EXCEPTION!! Socket timeout: ", time.time())
+                continue
+            except Exception as e:
+                print("EXCEPTION!! Packet not valid: ", e)
+                continue
+
+            if self.DEBUG: print("DEBUG >> get_checksum(content)", self.__get_checksum(content))
+            checksum_OK = (check == self.__get_checksum(content))
+
+            if checksum_OK and (next_acknum == inp_acknum) and (snd_addr == inp_src_addr):
+                rcvd_data += content
+                last_check = check
+
+                # Sending ACK
+                next_acknum = (inp_acknum + self.ONE) % 2
+                ack_segment = self.__make_pkt(my_addr, inp_src_addr, inp_seqnum, next_acknum, self.ITS_ACK_PKT,
+                                                 last_pkt, b'')
+                if self.DEBUG: print("DEBUG >> Forwarded package", self.p_resend)  ###
+                self.p_resend = self.p_resend + 1  ###
+                lora_obj.send(ack_segment)
+                if self.DEBUG: print("DEBUG >> Sent ACK", ack_segment)
+                if last_pkt:
+                    break
+            elif checksum_OK and (last_check == check) and (snd_addr == inp_src_addr):
+                # KN: Handlig ACK lost
+                rcvd_data += content
+
+                # KN: Re-Sending ACK
+                next_acknum = (inp_acknum + self.ZERO) % 2
+                ack_segment = self.__make_pkt(my_addr, inp_src_addr, inp_seqnum, next_acknum, self.ITS_ACK_PKT,
+                                                 last_pkt, b'')
+                self.conta = self.conta - 1
+                if self.DEBUG: print("DEBUG >> Forwarded package", self.p_resend)  ###
+                lora_obj.send(ack_segment)
+                if self.DEBUG: print("DEBUG >> re-sending ACK", ack_segment)
+                if last_pkt:
+                    break
+            else:
+                if self.DEBUG: print("DEBUG >> packet not valid", packet)
+
+            # KN: Enabling garbage collection
+        last_check = 0
+        packet = ""
+        content = ""
+        gc.enable()
+        gc.collect()
+        return rcvd_data, snd_addr
+
+    def connect(self, dest=ANY_ADDR):
+        print("loractp: connecting to... ", dest)
+        rcvr_addr, stats_psent, stats_retrans, FAILED = self._csend(b"CONNECT", self.lora, self.lora_mac, dest)
+        return self.my_addr, rcvr_addr, stats_retrans, FAILED
+
+    def listen(self, sender=ANY_ADDR):
+        print("loractp: listening for...", sender)
+        rcvd_data, snd_addr = self._crecv(self.lora, self.lora_mac, sender)
+        if rcvd_data == b"CONNECT":
+            return self.my_addr, snd_addr, 0
+        else:
+            return self.my_addr, snd_addr, -1
+
+    def sendit(self, addr=ANY_ADDR, payload=b''):
+        rcvr_addr, stats_psent, stats_retrans, FAILED = self._csend(payload, self.lora, self.my_addr, self.ANY_ADDR)
+        return rcvr_addr, stats_retrans, FAILED
+
+    def recvit(self, addr=ANY_ADDR):
+        rcvd_data, snd_addr = self._crecv(self.lora, self.lora_mac, addr)
+        return rcvd_data, snd_addr
+
+

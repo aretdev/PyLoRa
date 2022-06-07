@@ -51,6 +51,8 @@ class BOARD:
     # high band (called band 3) is 862-1020
     low_band = True
 
+    timeOutBackUp = None
+
     @staticmethod
     def setup():
         """ Configure the Raspberry GPIOs
@@ -134,8 +136,10 @@ class BOARD:
         GPIO.remove_event_detect(BOARD.DIO0)
         chanel = GPIO.wait_for_edge(BOARD.DIO0, GPIO.RISING, timeout=value)
         if chanel is None:
+            BOARD.timeOutBackUp = None
             raise TimeoutError("DIO0 wasnt activated! expcetion thrown")
         else:
+            BOARD.timeOutBackUp = None
             callback(None)
         return chanel
 
