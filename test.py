@@ -5,19 +5,11 @@
 #
 # ctp.sendit("")
 
-
-import ujson
-import math
-import time
 import gc
-import ucrypto
 import loractp
 
 
-def random_in_range(l=0, h=1000):
-    r1 = ucrypto.getrandbits(32)
-    r2 = ((r1[0] << 24) + (r1[1] << 16) + (r1[2] << 8) + r1[3]) / 4294967295.0
-    return math.floor(r2 * h + l)
+
 
 
 gc.enable()
@@ -40,9 +32,8 @@ while True:
         print("pong.py: EXCEPTION!! ", e)
         break
 
-    tbs = {"type": "PONG", "value": rcvd_data, "time": time.time()}
-    tbsj = ujson.dumps(tbs)
-    tbsb = str.encode(tbsj)
+    tbs = '{"type": "PONG", "value": rcvd_data, "time": 69}'
+    tbsb = str.encode(tbs)
     print('--->pong.py: sending ', tbsb)
     try:
         addr, quality, result = ctpc.sendit(rcvraddr, tbsb)

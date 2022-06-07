@@ -241,17 +241,21 @@ class CTPLoraEndPoint:
 
         next_acknum = self.ONE
         lora_obj.set_timeout(5)
-
+        print("1")
         if (snd_addr == self.ANY_ADDR) or (snd_addr == b''): SENDER_ADDR_KNOWN = False
         self.p_resend = 0  ###
 
         # Enabling garbage collection
         gc.enable()
         gc.collect()
+        print("2")
 
         while True:
             try:
-                packet = lora_obj.recv(self.MAX_PKT_SIZE)
+                print("3")
+                lora_obj.recv()
+                print("4")
+                packet = bytes(lora_obj.payload)
                 if self.DEBUG: print("DEBUG >> packet received: ", packet)
                 inp_src_addr, inp_dst_addr, inp_seqnum, inp_acknum, is_ack, last_pkt, check, content = self.__unpack(
                     packet)
