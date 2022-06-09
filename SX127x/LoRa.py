@@ -83,9 +83,7 @@ def setter(register_address):
 
 class LoRa(object):
 
-
-    backupTimeout = None
-    blocking = False
+    backUpTimeOut = None
     spi = BOARD.SpiDev()              # init and get the baord's SPI
     mode = None                       # the mode is backed up here
     backup_registers = []
@@ -148,11 +146,10 @@ class LoRa(object):
         self.payload = self.read_payload(nocheck=True)
         self.reset_ptr_rx()  # we clear pointer
         self.set_mode(MODE.RXCONT)
-        self.blocking = False
+        print(self.payload)
 
     def on_tx_done(self):
         self.clear_irq_flags(TxDone=1)  # clear txdone IRQ flag
-        self.blocking = False
 
     def on_cad_done(self):
         pass
@@ -215,39 +212,27 @@ class LoRa(object):
         """ Util Method for recv
             It will turn automatically the device on receive mode
         """
-        if self.blocking:
-            time.sleep(0.1)
-
-        if BOARD.timeOutBackUp is None:
-            BOARD.add_event_dio0(self._dio0)
-        else:
-            BOARD.settimeout(BOARD.timeOutBackUp, callback=self._dio0)
-
-        self.blocking = True
         self.set_mode(MODE.SLEEP)
         self.set_dio_mapping(0)
         self.reset_ptr_rx()
         self.set_mode(MODE.RXCONT)
+        BOARD.add_event_dio0(self._dio0, self.backUpTimeOut)
 
     def set_timeout(self, value):
         """ set timeout for operations
             After we determine if we want to send or receive, we need to specify a timeout
         """
-        BOARD.timeOutBackUp = value * 1000
-        return BOARD.timeOutBackUp
+        self.backUpTimeOut = value * 1000
 
     def send(self, content):
-        if self.blocking:
-            time.sleep(0.1)
 
-        BOARD.add_event_dio0(self._dio0)
-        self.blocking = True
         self.set_mode(MODE.SLEEP)
         self.set_dio_mapping(1)  # DIO0 = 1 is for TXDone, transmitting mode basically
         self.set_mode(MODE.STDBY)
         formatted = list(content)
         self.write_payload(formatted)  # I send my payload to LORA SX1276 interface
         self.set_mode(MODE.TX)  # I enter on TX Mode
+        BOARD.add_event_dio0(self._dio0, self.backUpTimeOut)
 
     def write_payload(self, payload):
         """ Get FIFO ready for TX: Set FifoAddrPtr to FifoTxBaseAddr. The transceiver is put into STDBY mode.

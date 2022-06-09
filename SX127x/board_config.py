@@ -95,20 +95,24 @@ class BOARD:
         BOARD.spi.max_speed_hz = 5000000
         return BOARD.spi
 
-    @staticmethod
-    def add_event_detect(dio_number, callback):
-        """ Wraps around the GPIO.add_event_detect function
-        :param dio_number: DIO pin 0...5
-        :param callback: The function to call when the DIO triggers an IRQ.
-        :return: None
-        """
-        GPIO.add_event_detect(dio_number, GPIO.RISING, callback=callback)
+
 
     @staticmethod
-    def add_event_dio0(cb_dio0):
+    def add_event_dio0(cb_dio0, value=None):
         if BOARD.DIO0 is not None:
             GPIO.remove_event_detect(BOARD.DIO0)
-            GPIO.add_event_detect(BOARD.DIO0, GPIO.RISING, callback=cb_dio0)
+            chanel = 0
+            if value is None:
+                chanel = GPIO.wait_for_edge(BOARD.DIO0, GPIO.RISING)
+            else:
+                chanel = GPIO.wait_for_edge(BOARD.DIO0, GPIO.RISING, timeout=value)
+
+            if chanel is None and value is not None:
+                raise TimeoutError("DIO0 wasnt activated! expcetion thrown")
+            else:
+                cb_dio0(None)
+            return chanel
+
 
     @staticmethod
     def reset():
@@ -134,12 +138,12 @@ class BOARD:
     def settimeout(value, callback):
         # If we adding a timeout , we clear possible events assigned to this pin (DIO0)
         GPIO.remove_event_detect(BOARD.DIO0)
+        print("xd2 -> ", value)
         chanel = GPIO.wait_for_edge(BOARD.DIO0, GPIO.RISING, timeout=value)
+        print("xd3 ->" , chanel)
         if chanel is None:
-            BOARD.timeOutBackUp = None
             raise TimeoutError("DIO0 wasnt activated! expcetion thrown")
         else:
-            BOARD.timeOutBackUp = None
             callback(None)
         return chanel
 

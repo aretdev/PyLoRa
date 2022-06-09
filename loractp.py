@@ -36,11 +36,11 @@ class CTPLoraEndPoint:
         self.DEBUG = DEBUG
 
         self.lora = LoRa.LoRa(verbose=False,
-                         do_calibration=True,
-                         calibration_freq=868,
-                         sf=7,
-                         cr=constants.CODING_RATE.CR4_5,
-                         freq=869)
+                              do_calibration=True,
+                              calibration_freq=868,
+                              sf=7,
+                              cr=constants.CODING_RATE.CR4_5,
+                              freq=869)
 
         self.lora.set_mode(constants.MODE.STDBY)
         self.lora.set_pa_config(pa_select=1)
@@ -50,37 +50,33 @@ class CTPLoraEndPoint:
 
     def __make_pkt(self, source, destination, seqnum, acknum, pkt_type, is_last, payload):
 
+        print(payload)
         if self.DEBUG: print("DEBUG >> Making pkt: ", source, destination, seqnum, acknum, pkt_type, is_last, payload)
         #                 0/1   0/1   0/1     0/1
         # FLAGS FORMAT : [SEQ | ACK | LAST | TYPE ]
         flags = 0
         if seqnum == self.ONE:
-            flags = 1
-            print(" - DEBUG flags >>: ", bin(flags))
-
+            flags = flags | (1 << 0)
         if acknum == self.ONE:
             flags = flags | (1 << 2)
-            print(" - DEBUG flags >>: ", bin(flags))
-
         if is_last:
             flags = flags | (1 << 4)
-            print(" - DEBUG flags >>: ", bin(flags))
-
         if pkt_type == self.ITS_ACK_PKT:
             flags = flags | (1 << 6)
-            print(" - DEBUG flags >>: ", bin(flags))
 
-        if len(payload) > 0 and pkt_type == self.ITS_DATA_PKT:
-            # I'm a data packet, getting checksum of payload!
+        if (len(payload) > 0 and (pkt_type == self.ITS_DATA_PKT)):
+            # p = struct.pack(self.PAYLOAD_FORMAT, content)
             p = payload
-            checksum = self.__get_checksum(p)
-            header = struct.pack(self.HEADER_FORMAT, source, destination, flags, checksum)
-            if self.DEBUG: print("DEBUG >> Resultant Data Packet: ", header + p)
+            check = self.__get_checksum(p)
+            print(check)
+            h = struct.pack(self.HEADER_FORMAT, source, destination, flags, check)
+            if self.DEBUG: print("DEBUG 096:", h + p)
         else:
-            p = b''  # I'm an ACK, no data content transmitted
-            header = struct.pack(self.HEADER_FORMAT, source, destination, flags, p)
-            if self.DEBUG: print("DEBUG >> Resultant ACK Packet: ", header + p)
-        return header + p
+            p = b''
+            h = struct.pack(self.HEADER_FORMAT, source, destination, flags, b'')
+            if self.DEBUG: print("DEBUG 100:", h + p)
+
+        return h + p
 
     def __unpack(self, packet):
         header = packet[:self.HEADER_SIZE]
@@ -106,12 +102,12 @@ class CTPLoraEndPoint:
 
         if self.DEBUG: print("DEBUG >> Checksum: ", ha[-3:])
 
-        return ha[-3:]
+        return (ha[-3:])
 
     def _csend(self, content, lora_obj, sender_addr, receiver_addr):
-
         sender_addr = sender_addr[8:]
         receiver_addr = receiver_addr[8:]
+
         if self.DEBUG: print("DEBUG >> Sender, Receiver ", sender_addr, receiver_addr)
 
         if len(content) == 0: print("WARNING ON SEND!: Content size is 0! continuing... ")
@@ -135,7 +131,7 @@ class CTPLoraEndPoint:
         timeout_time = 1
         estimated_rtt = -1
         dev_rtt = 1
-
+        lora_obj.set_timeout(5)
         # Loractp is stop and wait protocol
         seqnum = self.ZERO
         acknum = self.ONE
@@ -164,14 +160,15 @@ class CTPLoraEndPoint:
                 try:
                     time.sleep(3 - keep_trying)
                     send_time = time.time()
+
                     lora_obj.send(packet)
-                    lora_obj.recv()
-                    lora_obj.set_timeout(timeout_value)
                     if self.DEBUG: print("DEBUG >> Waiting for ack...")
+                    lora_obj.set_timeout(timeout_value)
                     lora_obj.recv()
                     recv_time = time.time()
                     if self.DEBUG: print("DEBUG >> Ack received!")
-                    ack = bytes(lora_obj.payload)
+                    ack = lora_obj.payload
+                    print("p2->  ", lora_obj.payload)
                     ack_saddr, ack_daddr, ack_seqnum, ack_acknum, ack_is_ack, ack_final, ack_check, ack_content = \
                         self.__unpack(ack)
                     if receiver_addr == self.ANY_ADDR or receiver_addr == b'':
@@ -189,7 +186,7 @@ class CTPLoraEndPoint:
                 except TimeoutError:
                     if self.DEBUG: print("DEBUG >> ERROR! no ack received")
 
-                if self.DEBUG: print("DEBUG >> TRYING ATTEMPT:  ", 11 - keep_trying)
+                if self.DEBUG: print("DEBUG >> TRYING ATTEMPT:  ", 3 - keep_trying)
 
                 stats_psent += 1
                 stats_retrans += 1
@@ -241,24 +238,21 @@ class CTPLoraEndPoint:
 
         next_acknum = self.ONE
         lora_obj.set_timeout(5)
-        print("1")
         if (snd_addr == self.ANY_ADDR) or (snd_addr == b''): SENDER_ADDR_KNOWN = False
         self.p_resend = 0  ###
 
         # Enabling garbage collection
         gc.enable()
         gc.collect()
-        print("2")
 
         while True:
             try:
-                print("3")
                 lora_obj.recv()
-                print("4")
-                packet = bytes(lora_obj.payload)
+                packet = bytes(lora_obj.payload, encoding="utf-8")
                 if self.DEBUG: print("DEBUG >> packet received: ", packet)
                 inp_src_addr, inp_dst_addr, inp_seqnum, inp_acknum, is_ack, last_pkt, check, content = self.__unpack(
                     packet)
+
                 # getting sender address, if unknown, with the first packet
                 if not SENDER_ADDR_KNOWN:
                     snd_addr = inp_src_addr
@@ -284,7 +278,7 @@ class CTPLoraEndPoint:
                 # Sending ACK
                 next_acknum = (inp_acknum + self.ONE) % 2
                 ack_segment = self.__make_pkt(my_addr, inp_src_addr, inp_seqnum, next_acknum, self.ITS_ACK_PKT,
-                                                 last_pkt, b'')
+                                              last_pkt, b'')
                 if self.DEBUG: print("DEBUG >> Forwarded package", self.p_resend)  ###
                 self.p_resend = self.p_resend + 1  ###
                 lora_obj.send(ack_segment)
@@ -298,7 +292,7 @@ class CTPLoraEndPoint:
                 # KN: Re-Sending ACK
                 next_acknum = (inp_acknum + self.ZERO) % 2
                 ack_segment = self.__make_pkt(my_addr, inp_src_addr, inp_seqnum, next_acknum, self.ITS_ACK_PKT,
-                                                 last_pkt, b'')
+                                              last_pkt, b'')
                 self.conta = self.conta - 1
                 if self.DEBUG: print("DEBUG >> Forwarded package", self.p_resend)  ###
                 lora_obj.send(ack_segment)
@@ -318,7 +312,7 @@ class CTPLoraEndPoint:
 
     def connect(self, dest=ANY_ADDR):
         print("loractp: connecting to... ", dest)
-        rcvr_addr, stats_psent, stats_retrans, FAILED = self._csend(b"CONNECT", self.lora, self.lora_mac, dest)
+        rcvr_addr, stats_psent, stats_retrans, FAILED = self._csend(b'CONNECT', self.lora, self.my_addr, dest)
         return self.my_addr, rcvr_addr, stats_retrans, FAILED
 
     def listen(self, sender=ANY_ADDR):
@@ -337,4 +331,9 @@ class CTPLoraEndPoint:
         rcvd_data, snd_addr = self._crecv(self.lora, self.lora_mac, addr)
         return rcvd_data, snd_addr
 
+    def test(self):
+        s = self.__make_pkt(self.my_addr, self.ANY_ADDR, self.ZERO, self.ONE, self.ITS_DATA_PKT, True, b'CONNECT')
+        self.lora.send(s)
+        self.lora.set_timeout(5)
+        self.lora.recv()
 
