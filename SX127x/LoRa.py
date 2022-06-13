@@ -146,7 +146,6 @@ class LoRa(object):
         self.payload = self.read_payload(nocheck=True)
         self.reset_ptr_rx()  # we clear pointer
         self.set_mode(MODE.RXCONT)
-        print(self.payload)
 
     def on_tx_done(self):
         self.clear_irq_flags(TxDone=1)  # clear txdone IRQ flag
@@ -217,6 +216,7 @@ class LoRa(object):
         self.reset_ptr_rx()
         self.set_mode(MODE.RXCONT)
         BOARD.add_event_dio0(self._dio0, self.backUpTimeOut)
+        return bytes(self.payload)
 
     def set_timeout(self, value):
         """ set timeout for operations
@@ -247,7 +247,6 @@ class LoRa(object):
         BOARD.chip_select(True)
         v = self.spi.xfer([REG.LORA.FIFO | 0x80] + payload)[1:]
         BOARD.chip_select(False)
-        print([REG.LORA.FIFO | 0x80] + payload)
         return v
 
     def reset_ptr_rx(self):

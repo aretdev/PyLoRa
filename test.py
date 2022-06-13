@@ -3,7 +3,7 @@ from loractp import CTPLoraEndPoint
 
 ctp = CTPLoraEndPoint(DEBUG=True)
 
-ctp.test()
+ctp.connect()
 
 import gc
 import loractp

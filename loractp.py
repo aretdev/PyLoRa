@@ -45,12 +45,12 @@ class CTPLoraEndPoint:
         self.lora.set_mode(constants.MODE.STDBY)
         self.lora.set_pa_config(pa_select=1)
 
-        self.lora_mac = binascii.hexlify(bytes(getmac.get_mac_address(), encoding='utf8'))
+        self.lora_mac = binascii.hexlify(bytes(getmac.get_mac_address().replace(":",""), encoding="utf-8"))
         self.my_addr = self.lora_mac[8:]
+        print(self.my_addr)
 
     def __make_pkt(self, source, destination, seqnum, acknum, pkt_type, is_last, payload):
 
-        print(payload)
         if self.DEBUG: print("DEBUG >> Making pkt: ", source, destination, seqnum, acknum, pkt_type, is_last, payload)
         #                 0/1   0/1   0/1     0/1
         # FLAGS FORMAT : [SEQ | ACK | LAST | TYPE ]
@@ -81,8 +81,7 @@ class CTPLoraEndPoint:
     def __unpack(self, packet):
         header = packet[:self.HEADER_SIZE]
         content = packet[self.HEADER_SIZE:]
-
-        sender_addr, destination_addr, flags, check = struct.unpack(self.HEADER_FORMAT, header)
+        sender_addr, destination_addr, flags, check = struct.unpack(self.HEADER_FORMAT, bytes(header))
         seqnum = self.ONE if (flags & 1) & 1 else self.ZERO
         acknum = self.ONE if (flags >> 2) & 1 else self.ZERO
         is_last = (flags >> 4) & 1 == 1
@@ -107,6 +106,7 @@ class CTPLoraEndPoint:
     def _csend(self, content, lora_obj, sender_addr, receiver_addr):
         sender_addr = sender_addr[8:]
         receiver_addr = receiver_addr[8:]
+        sender_addr = b'3a37343a'
 
         if self.DEBUG: print("DEBUG >> Sender, Receiver ", sender_addr, receiver_addr)
 
@@ -164,17 +164,14 @@ class CTPLoraEndPoint:
                     lora_obj.send(packet)
                     if self.DEBUG: print("DEBUG >> Waiting for ack...")
                     lora_obj.set_timeout(timeout_value)
-                    lora_obj.recv()
+                    ack = lora_obj.recv()
                     recv_time = time.time()
                     if self.DEBUG: print("DEBUG >> Ack received!")
-                    ack = lora_obj.payload
-                    print("p2->  ", lora_obj.payload)
                     ack_saddr, ack_daddr, ack_seqnum, ack_acknum, ack_is_ack, ack_final, ack_check, ack_content = \
                         self.__unpack(ack)
                     if receiver_addr == self.ANY_ADDR or receiver_addr == b'':
                         # Who sent the ACK on Any address is now the one who is going to receive packets
                         receiver_addr = ack_saddr
-
                     if ack_is_ack and ack_acknum == seqnum and sender_addr == ack_daddr and receiver_addr == ack_saddr:
                         stats_psent += 1
                         # No more need to retry
