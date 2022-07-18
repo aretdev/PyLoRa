@@ -1,43 +1,12 @@
 """ Defines the SX127x class and a few utility functions. """
-# -*- coding: utf-8 -*-
-
-# Copyright 2015-2018 Mayer Analytics Ltd.
-#
-# This file is part of pySX127x.
-#
-# pySX127x is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public
-# License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later
-# version.
-#
-# pySX127x is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
-# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
-# details.
-#
-# You can be released from the requirements of the license by obtaining a commercial license. Such a license is
-# mandatory as soon as you develop commercial activities involving pySX127x without disclosing the source code of your
-# own applications, or shipping pySX127x with a closed source product.
-#
-# You should have received a copy of the GNU General Public License along with pySX127.  If not, see
-# <http://www.gnu.org/licenses/>.
-
 
 import sys
-import time
-from .constants import *
-from .board_config import BOARD
+from constants import *
 
 
 ################################################## Some utility functions ##############################################
 
 def set_bit(value, index, new_bit):
-    """ Set the index'th bit of value to new_bit, and return the new value.
-    :param value:   The integer to set the new_bit in
-    :type value:    int
-    :param index: 0-based index
-    :param new_bit: New value the bit shall have (0 or 1)
-    :return:    Changed value
-    :rtype: int
-    """
     mask = 1 << index
     value &= ~mask
     if new_bit:
@@ -52,13 +21,14 @@ def getter(register_address):
     :return: Register value
     :rtype: int
     """
+
     def decorator(func):
         def wrapper(self):
-            BOARD.chip_select(True)
-            v = self.spi.xfer([register_address, 0])[1]
-            BOARD.chip_select(False)
+            v = self.spi.transfer(address=register_address)
             return func(self, v)
+
         return wrapper
+
     return decorator
 
 
@@ -69,62 +39,78 @@ def setter(register_address):
     :return: New register value
     :rtype: int
     """
+
     def decorator(func):
         def wrapper(self, val):
-            BOARD.chip_select(True)
-            v = self.spi.xfer([register_address | 0x80, func(self, val)])[1]
-            BOARD.chip_select(False)
+            v = self.spi.transfer(address=register_address | 0x80, value=func(self, val))
             return v
+
         return wrapper
+
     return decorator
 
 
 ############################################### Definition of the LoRa class ###########################################
 
-class LoRa(object):
-
-    backUpTimeOut = None
-    spi = BOARD.SpiDev()              # init and get the baord's SPI
-    mode = None                       # the mode is backed up here
-    backup_registers = []
+class LoRa:
+    selected_chip = None
+    spi = None  # init and get the baord's SPI
+    mode = None  # the mode is backed up here
     verbose = True
-    dio0_mapping = None         # store the dio mapping here
+    dio_mapping = [None] * 4  # store the dio mapping here
 
-    def __init__(self, verbose=True, do_calibration=True, calibration_freq=868,sf=7, cr=CODING_RATE.CR4_5, freq=868, sync_word=0x34, rx_crc=False):
-        """ Init the object
+    def __init__(self,
+                 Board_specification=None,
+                 verbose=True,
+                 do_calibration=True,
+                 calibration_freq=868,
+                 sf=7,
+                 cr=CODING_RATE.CR4_5,
+                 freq=868,
+                 sync_word=0x34,
+                 rx_crc=False,
+                 signal_bandwidth=BW.BW125):
 
-        Send the device to sleep, read all registers, and do the calibration (if do_calibration=True)
-        :param verbose: Set the verbosity True/False
-        :param calibration_freq: call rx_chain_calibration with this parameter. Default is 868
-        :param do_calibration: Call rx_chain_calibration, default is True.
-        """
+        if Board_specification is None:
+            raise NotImplemented("A Board specification is needed for SX127X to work.")
+
+        # Initialize corresponding Board
+        self.selected_chip = Board_specification()
+
+        # Create real SPI object
+        self.selected_chip.init_spi()
+
+        self.selected_chip.set_irq_callbacks(cb_dio0=self._dio0)
+        # Get working class with util methods of SPI
+        self.spi = self.selected_chip.get_spi()
+
         self.payload = ""
         self.freq = freq
         self.verbose = verbose
+        self.set_bw(signal_bandwidth)
 
         # set mode to sleep and read all registers
         self.set_mode(MODE.SLEEP)
-        self.backup_registers = self.get_all_registers()
 
         # more setup work:
         if do_calibration:
             self.rx_chain_calibration(calibration_freq)
         # the FSK registers are set up exactly as modtronix do it:
         lookup_fsk = [
-            #[REG.FSK.LNA            , 0x23],
-            #[REG.FSK.RX_CONFIG      , 0x1E],
-            #[REG.FSK.RSSI_CONFIG    , 0xD2],
-            #[REG.FSK.PREAMBLE_DETECT, 0xAA],
-            #[REG.FSK.OSC            , 0x07],
-            #[REG.FSK.SYNC_CONFIG    , 0x12],
-            #[REG.FSK.SYNC_VALUE_1   , 0xC1],
-            #[REG.FSK.SYNC_VALUE_2   , 0x94],
-            #[REG.FSK.SYNC_VALUE_3   , 0xC1],
-            #[REG.FSK.PACKET_CONFIG_1, 0xD8],
-            #[REG.FSK.FIFO_THRESH    , 0x8F],
-            #[REG.FSK.IMAGE_CAL      , 0x02],
-            #[REG.FSK.DIO_MAPPING_1  , 0x00],
-            #[REG.FSK.DIO_MAPPING_2  , 0x30]
+            # [REG.FSK.LNA            , 0x23],
+            # [REG.FSK.RX_CONFIG      , 0x1E],
+            # [REG.FSK.RSSI_CONFIG    , 0xD2],
+            # [REG.FSK.PREAMBLE_DETECT, 0xAA],
+            # [REG.FSK.OSC            , 0x07],
+            # [REG.FSK.SYNC_CONFIG    , 0x12],
+            # [REG.FSK.SYNC_VALUE_1   , 0xC1],
+            # [REG.FSK.SYNC_VALUE_2   , 0x94],
+            # [REG.FSK.SYNC_VALUE_3   , 0xC1],
+            # [REG.FSK.PACKET_CONFIG_1, 0xD8],
+            # [REG.FSK.FIFO_THRESH    , 0x8F],
+            # [REG.FSK.IMAGE_CAL      , 0x02],
+            # [REG.FSK.DIO_MAPPING_1  , 0x00],
+            # [REG.FSK.DIO_MAPPING_2  , 0x30]
         ]
         self.set_mode(MODE.FSK_STDBY)
         for register_address, value in lookup_fsk:
@@ -140,7 +126,11 @@ class LoRa(object):
         # set the dio_ mapping by calling the two get_dio_mapping_* functions
         self.get_dio_mapping_1()
 
+        self.set_mode(MODE.STDBY)
+        self.set_pa_config(pa_select=1)
+
     # Overridable functions:
+
     def on_rx_done(self):
         self.clear_irq_flags(RxDone=1)  # clear rxdone IRQ flag
         self.payload = self.read_payload(nocheck=True)
@@ -165,30 +155,31 @@ class LoRa(object):
     def on_fhss_change_channel(self):
         pass
 
-    # Internal callbacks for DIO0
+        # Internal callbacks for DIO0
 
     def _dio0(self, channel):
         # DIO0 00: RxDone
         # DIO0 01: TxDone
         # DIO0 10: CadDone
-        if self.dio0_mapping == 0:
+        if self.dio_mapping[0] == 0:
             self.on_rx_done()
-        elif self.dio0_mapping == 1:
+        elif self.dio_mapping[0] == 1:
             self.on_tx_done()
-        elif self.dio0_mapping == 2:
+        elif self.dio_mapping[0] == 2:
             self.on_cad_done()
         else:
             raise RuntimeError("unknown dio0mapping!")
 
-    # All the set/get/read/write functions
+        # All the set/get/read/write functions
+
+    def set_dio0_status(self, timeout_value=None, socket_blocked=None):
+        self.selected_chip.add_event_dio0(value=timeout_value, blocked=socket_blocked)
 
     def get_mode(self):
         """ Get the mode
         :return:    New mode
         """
-        BOARD.chip_select(True)
-        self.mode = self.spi.xfer([REG.LORA.OP_MODE, 0])[1]
-        BOARD.chip_select(False)
+        self.mode = self.spi.transfer(address=REG.LORA.OP_MODE)
         return self.mode
 
     def set_mode(self, mode):
@@ -202,37 +193,8 @@ class LoRa(object):
         if self.verbose:
             sys.stderr.write("Mode <- %s\n" % MODE.lookup[mode])
         self.mode = mode
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.OP_MODE | 0x80, mode])[1]
-        BOARD.chip_select(False)
+        v = self.spi.transfer(address=REG.LORA.OP_MODE | 0x80, value=mode)
         return v
-
-    def recv(self):
-        """ Util Method for recv
-            It will turn automatically the device on receive mode
-        """
-        self.set_mode(MODE.SLEEP)
-        self.set_dio_mapping(0)
-        self.reset_ptr_rx()
-        self.set_mode(MODE.RXCONT)
-        BOARD.add_event_dio0(self._dio0, self.backUpTimeOut)
-        return bytes(self.payload)
-
-    def set_timeout(self, value):
-        """ set timeout for operations
-            After we determine if we want to send or receive, we need to specify a timeout
-        """
-        self.backUpTimeOut = value * 1000
-
-    def send(self, content):
-
-        self.set_mode(MODE.SLEEP)
-        self.set_dio_mapping(1)  # DIO0 = 1 is for TXDone, transmitting mode basically
-        self.set_mode(MODE.STDBY)
-        formatted = list(content)
-        self.write_payload(formatted)  # I send my payload to LORA SX1276 interface
-        self.set_mode(MODE.TX)  # I enter on TX Mode
-        BOARD.add_event_dio0(self._dio0, self.backUpTimeOut)
 
     def write_payload(self, payload):
         """ Get FIFO ready for TX: Set FifoAddrPtr to FifoTxBaseAddr. The transceiver is put into STDBY mode.
@@ -244,10 +206,10 @@ class LoRa(object):
         self.set_mode(MODE.STDBY)
         base_addr = self.get_fifo_tx_base_addr()
         self.set_fifo_addr_ptr(base_addr)
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FIFO | 0x80] + payload)[1:]
-        BOARD.chip_select(False)
-        return v
+        for i in range(payload_size):
+            self.spi.transfer(address=REG.LORA.FIFO | 0x80, value=payload[i])
+
+        return payload
 
     def reset_ptr_rx(self):
         """ Get FIFO ready for RX: Set FifoAddrPtr to FifoRxBaseAddr. The transceiver is put into STDBY mode. """
@@ -274,9 +236,9 @@ class LoRa(object):
         rx_nb_bytes = self.get_rx_nb_bytes()
         fifo_rx_current_addr = self.get_fifo_rx_current_addr()
         self.set_fifo_addr_ptr(fifo_rx_current_addr)
-        BOARD.chip_select(True)
-        payload = self.spi.xfer([REG.LORA.FIFO] + [0] * rx_nb_bytes)[1:]
-        BOARD.chip_select(False)
+        payload = bytearray()
+        for i in range(rx_nb_bytes):
+            payload.append(self.spi.transfer(address=REG.LORA.FIFO))
         return payload
 
     def get_freq(self):
@@ -284,10 +246,11 @@ class LoRa(object):
         :return:    Frequency in MHz
         :rtype:     float
         """
-        BOARD.chip_select(True)
-        msb, mid, lsb = self.spi.xfer([REG.LORA.FR_MSB, 0, 0, 0])[1:]
-        BOARD.chip_select(False)
-        f = lsb + 256*(mid + 256*msb)
+        msb = self.spi.transfer(address=REG.LORA.FR_MSB)
+        mid = self.spi.transfer(address=REG.LORA.FR_MID)
+        lsb = self.spi.transfer(address=REG.LORA.FR_LSB)
+
+        f = lsb + 256 * (mid + 256 * msb)
         return f / 16384.
 
     def set_freq(self, f):
@@ -298,23 +261,23 @@ class LoRa(object):
         :rtype: list[int]
         """
         assert self.mode == MODE.SLEEP or self.mode == MODE.STDBY or self.mode == MODE.FSK_STDBY
-        i = int(f * 16384.)    # choose floor
+        i = int(f * 16384.)  # choose floor
         msb = i // 65536
         i -= msb * 65536
         mid = i // 256
         i -= mid * 256
         lsb = i
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FR_MSB | 0x80, msb, mid, lsb])
-        BOARD.chip_select(False)
-        return v
+
+        msb = self.spi.transfer(address=REG.LORA.FR_MSB | 0x80, value=msb)
+        mid = self.spi.transfer(address=REG.LORA.FR_MID | 0x80, value=mid)
+        lsb = self.spi.transfer(address=REG.LORA.FR_LSB | 0x80, value=lsb)
+
+        return [msb, mid, lsb]
 
     def get_pa_config(self, convert_dBm=False):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.PA_CONFIG, 0])[1]
-        BOARD.chip_select(False)
-        pa_select    = v >> 7
-        max_power    = v >> 4 & 0b111
+        v = self.spi.transfer(address=REG.LORA.PA_CONFIG)
+        pa_select = v >> 7
+        max_power = v >> 4 & 0b111
         output_power = v & 0b1111
         if convert_dBm:
             max_power = max_power * .6 + 10.8
@@ -323,10 +286,10 @@ class LoRa(object):
             else:
                 output_power = 17 - (15 - output_power)
         return dict(
-                pa_select    = pa_select,
-                max_power    = max_power,
-                output_power = output_power
-            )
+            pa_select=pa_select,
+            max_power=max_power,
+            output_power=output_power
+        )
 
     def set_pa_config(self, pa_select=None, max_power=None, output_power=None):
         """ Configure the PA
@@ -338,11 +301,18 @@ class LoRa(object):
         """
         loc = locals()
         current = self.get_pa_config()
-        loc = {s: current[s] if loc[s] is None else loc[s] for s in loc}
-        val = (loc['pa_select'] << 7) | (loc['max_power'] << 4) | (loc['output_power'])
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.PA_CONFIG | 0x80, val])[1]
-        BOARD.chip_select(False)
+
+        if pa_select is not None:
+            current['pa_select'] = pa_select
+
+        if max_power is not None:
+            current['max_power'] = max_power
+
+        if output_power is not None:
+            current['output_power'] = output_power
+
+        val = (current['pa_select'] << 7) | (current['max_power'] << 4) | (current['output_power'])
+        v = self.spi.transfer(address=REG.LORA.PA_CONFIG | 0x80, value=val)
         return v
 
     @getter(REG.LORA.PA_RAMP)
@@ -354,9 +324,9 @@ class LoRa(object):
         return val & 0b1111
 
     def get_ocp(self, convert_mA=False):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.OCP, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.OCP)
+
         ocp_on = v >> 5 & 0x01
         ocp_trim = v & 0b11111
         if convert_mA:
@@ -367,34 +337,60 @@ class LoRa(object):
             else:
                 assert ocp_trim <= 27
         return dict(
-                ocp_on   = ocp_on,
-                ocp_trim = ocp_trim
-                )
+            ocp_on=ocp_on,
+            ocp_trim=ocp_trim
+        )
 
     def set_ocp_trim(self, I_mA):
-        assert(I_mA >= 45 and I_mA <= 240)
-        BOARD.chip_select(True)
-        ocp_on = self.spi.xfer([REG.LORA.OCP, 0])[1] >> 5 & 0x01
-        BOARD.chip_select(False)
+        assert (I_mA >= 45 and I_mA <= 240)
+
+        ocp_on = self.spi.transfer(address=REG.LORA.OCP) >> 5 & 0x01
+
         if I_mA <= 120:
-            v = int(round((I_mA-45.)/5.))
+            v = int(round((I_mA - 45.) / 5.))
         else:
-            v = int(round((I_mA+30.)/10.))
+            v = int(round((I_mA + 30.) / 10.))
         v = set_bit(v, 5, ocp_on)
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.OCP | 0x80, v])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.OCP | 0x80, value=v)
+
         return v
 
-    def get_lna(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.LNA, 0])[1]
-        BOARD.chip_select(False)
+    def get_modem_config_1(self):
+        val = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_1)
         return dict(
-                lna_gain     = v >> 5,
-                lna_boost_lf = v >> 3 & 0b11,
-                lna_boost_hf = v & 0b11
-            )
+            bw=val >> 4 & 0x0F,
+            coding_rate=val >> 1 & 0x07,
+            implicit_header_mode=val & 0x01
+        )
+
+    def get_modem_config_2(self, include_symb_timout_lsb=False):
+        val = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_2)
+        d = dict(
+            spreading_factor=val >> 4 & 0x0F,
+            tx_cont_mode=val >> 3 & 0x01,
+            rx_crc=val >> 2 & 0x01,
+        )
+        if include_symb_timout_lsb:
+            d['symb_timout_lsb'] = val & 0x03
+        return d
+
+    def get_modem_config_3(self):
+        val = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_3)
+        return dict(
+            low_data_rate_optim=val >> 3 & 0x01,
+            agc_auto_on=val >> 2 & 0x01
+        )
+
+    def get_lna(self):
+
+        v = self.spi.transfer(address=REG.LORA.LNA)
+
+        return dict(
+            lna_gain=v >> 5,
+            lna_boost_lf=v >> 3 & 0b11,
+            lna_boost_hf=v & 0b11
+        )
 
     def set_lna(self, lna_gain=None, lna_boost_lf=None, lna_boost_hf=None):
         assert lna_boost_hf is None or lna_boost_hf == 0b00 or lna_boost_hf == 0b11
@@ -406,9 +402,9 @@ class LoRa(object):
         current = self.get_lna()
         loc = {s: current[s] if loc[s] is None else loc[s] for s in loc}
         val = (loc['lna_gain'] << 5) | (loc['lna_boost_lf'] << 3) | (loc['lna_boost_hf'])
-        BOARD.chip_select(True)
-        retval = self.spi.xfer([REG.LORA.LNA | 0x80, val])[1]
-        BOARD.chip_select(False)
+
+        retval = self.spi.transfer(address=REG.LORA.LNA | 0x80, value=val)
+
         if lna_gain is not None:
             # agc_auto_on must track lna_gain: GAIN=NOT_USED -> agc_auto=ON, otherwise =OFF
             self.set_agc_auto_on(lna_gain == GAIN.NOT_USED)
@@ -418,114 +414,114 @@ class LoRa(object):
         self.set_lna(lna_gain=lna_gain)
 
     def get_fifo_addr_ptr(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FIFO_ADDR_PTR, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.FIFO_ADDR_PTR)
+
         return v
 
     def set_fifo_addr_ptr(self, ptr):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FIFO_ADDR_PTR | 0x80, ptr])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.FIFO_ADDR_PTR | 0x80, value=ptr)
+
         return v
 
     def get_fifo_tx_base_addr(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FIFO_TX_BASE_ADDR, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.FIFO_TX_BASE_ADDR)
+
         return v
 
     def set_fifo_tx_base_addr(self, ptr):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FIFO_TX_BASE_ADDR | 0x80, ptr])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.FIFO_TX_BASE_ADDR | 0x80, value=ptr)
+
         return v
 
     def get_fifo_rx_base_addr(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FIFO_RX_BASE_ADDR, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.FIFO_RX_BASE_ADDR)
+
         return v
 
     def set_fifo_rx_base_addr(self, ptr):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FIFO_RX_BASE_ADDR | 0x80, ptr])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.FIFO_RX_BASE_ADDR | 0x80, value=ptr)
+
         return v
 
     def get_fifo_rx_current_addr(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FIFO_RX_CURR_ADDR, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.FIFO_RX_CURR_ADDR)
+
         return v
 
     def get_fifo_rx_byte_addr(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.FIFO_RX_BYTE_ADDR, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.FIFO_RX_BYTE_ADDR)
+
         return v
 
     def get_irq_flags_mask(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.IRQ_FLAGS_MASK, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.IRQ_FLAGS_MASK)
+
         return dict(
-                rx_timeout     = v >> 7 & 0x01,
-                rx_done        = v >> 6 & 0x01,
-                crc_error      = v >> 5 & 0x01,
-                valid_header   = v >> 4 & 0x01,
-                tx_done        = v >> 3 & 0x01,
-                cad_done       = v >> 2 & 0x01,
-                fhss_change_ch = v >> 1 & 0x01,
-                cad_detected   = v >> 0 & 0x01,
-            )
+            rx_timeout=v >> 7 & 0x01,
+            rx_done=v >> 6 & 0x01,
+            crc_error=v >> 5 & 0x01,
+            valid_header=v >> 4 & 0x01,
+            tx_done=v >> 3 & 0x01,
+            cad_done=v >> 2 & 0x01,
+            fhss_change_ch=v >> 1 & 0x01,
+            cad_detected=v >> 0 & 0x01,
+        )
 
     def set_irq_flags_mask(self,
                            rx_timeout=None, rx_done=None, crc_error=None, valid_header=None, tx_done=None,
                            cad_done=None, fhss_change_ch=None, cad_detected=None):
         loc = locals()
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.IRQ_FLAGS_MASK, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.IRQ_FLAGS_MASK)
+
         for i, s in enumerate(['cad_detected', 'fhss_change_ch', 'cad_done', 'tx_done', 'valid_header',
                                'crc_error', 'rx_done', 'rx_timeout']):
             this_bit = locals()[s]
             if this_bit is not None:
                 v = set_bit(v, i, this_bit)
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.IRQ_FLAGS_MASK | 0x80, v])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.IRQ_FLAGS_MASK | 0x80, value=v)
+
         return v
 
     def get_irq_flags(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.IRQ_FLAGS, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.IRQ_FLAGS)
+
         return dict(
-                rx_timeout     = v >> 7 & 0x01,
-                rx_done        = v >> 6 & 0x01,
-                crc_error      = v >> 5 & 0x01,
-                valid_header   = v >> 4 & 0x01,
-                tx_done        = v >> 3 & 0x01,
-                cad_done       = v >> 2 & 0x01,
-                fhss_change_ch = v >> 1 & 0x01,
-                cad_detected   = v >> 0 & 0x01,
-            )
+            rx_timeout=v >> 7 & 0x01,
+            rx_done=v >> 6 & 0x01,
+            crc_error=v >> 5 & 0x01,
+            valid_header=v >> 4 & 0x01,
+            tx_done=v >> 3 & 0x01,
+            cad_done=v >> 2 & 0x01,
+            fhss_change_ch=v >> 1 & 0x01,
+            cad_detected=v >> 0 & 0x01,
+        )
 
     def set_irq_flags(self,
                       rx_timeout=None, rx_done=None, crc_error=None, valid_header=None, tx_done=None,
                       cad_done=None, fhss_change_ch=None, cad_detected=None):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.IRQ_FLAGS, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.IRQ_FLAGS)
+
         for i, s in enumerate(['cad_detected', 'fhss_change_ch', 'cad_done', 'tx_done', 'valid_header',
                                'crc_error', 'rx_done', 'rx_timeout']):
             this_bit = locals()[s]
             if this_bit is not None:
                 v = set_bit(v, i, this_bit)
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.IRQ_FLAGS | 0x80, v])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.IRQ_FLAGS | 0x80, value=v)
+
         return v
 
     def clear_irq_flags(self,
@@ -533,161 +529,120 @@ class LoRa(object):
                         ValidHeader=None, TxDone=None, CadDone=None,
                         FhssChangeChannel=None, CadDetected=None):
         v = 0
+
+        d = dict(CadDetected=CadDetected,
+                 FhssChangeChannel=FhssChangeChannel,
+                 CadDone=CadDone,
+                 TxDone=TxDone,
+                 ValidHeader=ValidHeader,
+                 PayloadCrcError=PayloadCrcError,
+                 RxDone=RxDone,
+                 RxTimeout=RxTimeout)
+
         for i, s in enumerate(['CadDetected', 'FhssChangeChannel', 'CadDone',
-                                'TxDone', 'ValidHeader', 'PayloadCrcError',
-                                'RxDone', 'RxTimeout']):
-            this_bit = locals()[s]
+                               'TxDone', 'ValidHeader', 'PayloadCrcError',
+                               'RxDone', 'RxTimeout']):
+            this_bit = d[s]
             if this_bit is not None:
                 v = set_bit(v, eval('MASK.IRQ_FLAGS.' + s), this_bit)
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.IRQ_FLAGS | 0x80, v])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.IRQ_FLAGS | 0x80, value=v)
+
         return v
 
     def get_rx_nb_bytes(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.RX_NB_BYTES, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=REG.LORA.RX_NB_BYTES)
+
         return v
-
-    def get_rx_header_cnt(self):
-        BOARD.chip_select(True)
-        msb, lsb = self.spi.xfer([REG.LORA.RX_HEADER_CNT_MSB, 0, 0])[1:]
-        BOARD.chip_select(False)
-        return lsb + 256 * msb
-
-    def get_rx_packet_cnt(self):
-        BOARD.chip_select(True)
-        msb, lsb = self.spi.xfer([REG.LORA.RX_PACKET_CNT_MSB, 0, 0])[1:]
-        BOARD.chip_select(False)
-        return lsb + 256 * msb
-
-    def get_modem_status(self):
-        BOARD.chip_select(True)
-        status = self.spi.xfer([REG.LORA.MODEM_STAT, 0])[1]
-        BOARD.chip_select(False)
-        return dict(
-                rx_coding_rate    = status >> 5 & 0x03,
-                modem_clear       = status >> 4 & 0x01,
-                header_info_valid = status >> 3 & 0x01,
-                rx_ongoing        = status >> 2 & 0x01,
-                signal_sync       = status >> 1 & 0x01,
-                signal_detected   = status >> 0 & 0x01
-            )
 
     def get_pkt_snr_value(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.PKT_SNR_VALUE, 0])[1]
-        BOARD.chip_select(False)
-        return (float(v-256) if v > 127 else float(v)) / 4.
+
+        v = self.spi.transfer(address=REG.LORA.PKT_SNR_VALUE)
+
+        return (float(v - 256) if v > 127 else float(v)) / 4.
 
     def get_pkt_rssi_value(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.PKT_RSSI_VALUE, 0])[1]
-        BOARD.chip_select(False)
-        return v - (164 if BOARD.low_band else 157)     # See datasheet 5.5.5. p. 87
+
+        v = self.spi.transfer(address=REG.LORA.PKT_RSSI_VALUE)
+
+        return v - (164 if self.selected_chip.low_band else 157)  # See datasheet 5.5.5. p. 87
 
     def get_rssi_value(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.RSSI_VALUE, 0])[1]
-        BOARD.chip_select(False)
-        return v - (164 if BOARD.low_band else 157)     # See datasheet 5.5.5. p. 87
+
+        v = self.spi.transfer(address=REG.LORA.RSSI_VALUE)
+
+        return v - (164 if self.selected_chip.low_band else 157)  # See datasheet 5.5.5. p. 87
 
     def get_hop_channel(self):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.HOP_CHANNEL, 0])[1]
-        BOARD.chip_select(False)
-        return dict(
-                pll_timeout          = v >> 7,
-                crc_on_payload       = v >> 6 & 0x01,
-                fhss_present_channel = v >> 5 & 0b111111
-            )
 
-    def get_modem_config_1(self):
-        BOARD.chip_select(True)
-        val = self.spi.xfer([REG.LORA.MODEM_CONFIG_1, 0])[1]
-        BOARD.chip_select(False)
-        return dict(
-                bw = val >> 4 & 0x0F,
-                coding_rate = val >> 1 & 0x07,
-                implicit_header_mode = val & 0x01
-            )
+        v = self.spi.transfer(address=REG.LORA.HOP_CHANNEL)
 
-    def set_modem_config_1(self, bw=None, coding_rate=None, implicit_header_mode=None):
-        loc = locals()
-        current = self.get_modem_config_1()
-        loc = {s: current[s] if loc[s] is None else loc[s] for s in loc}
-        val = loc['implicit_header_mode'] | (loc['coding_rate'] << 1) | (loc['bw'] << 4)
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.MODEM_CONFIG_1 | 0x80, val])[1]
-        BOARD.chip_select(False)
-        return v
+        return dict(
+            pll_timeout=v >> 7,
+            crc_on_payload=v >> 6 & 0x01,
+            fhss_present_channel=v >> 5 & 0b111111
+        )
 
     def set_bw(self, bw):
         """ Set the bandwidth 0=7.8kHz ... 9=500kHz
         :param bw: A number 0,2,3,...,9
         :return:
         """
-        self.set_modem_config_1(bw=bw)
+        config = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_1)
+        s = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_1 | 0x80, value=(config & 0x0f) | (bw << 4))
 
     def set_coding_rate(self, coding_rate):
         """ Set the coding rate 4/5, 4/6, 4/7, 4/8
         :param coding_rate: A number 1,2,3,4
         :return: New register value
         """
-        self.set_modem_config_1(coding_rate=coding_rate)
+        config = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_1)
+        self.spi.transfer(address=REG.LORA.MODEM_CONFIG_1 | 0x80, value=(config & 0xf1) | (coding_rate << 1))
 
     def set_implicit_header_mode(self, implicit_header_mode):
-        self.set_modem_config_1(implicit_header_mode=implicit_header_mode)
-
-    def get_modem_config_2(self, include_symb_timout_lsb=False):
-        BOARD.chip_select(True)
-        val = self.spi.xfer([REG.LORA.MODEM_CONFIG_2, 0])[1]
-        BOARD.chip_select(False)
-        d = dict(
-                spreading_factor = val >> 4 & 0x0F,
-                tx_cont_mode = val >> 3 & 0x01,
-                rx_crc = val >> 2 & 0x01,
-            )
-        if include_symb_timout_lsb:
-            d['symb_timout_lsb'] = val & 0x03
-        return d
-
-    def set_modem_config_2(self, spreading_factor=None, tx_cont_mode=None, rx_crc=None):
-        loc = locals()
-        # RegModemConfig2 contains the SymbTimout MSB bits. We tack the back on when writing this register.
-        current = self.get_modem_config_2(include_symb_timout_lsb=True)
-        loc = {s: current[s] if loc[s] is None else loc[s] for s in loc}
-        val = (loc['spreading_factor'] << 4) | (loc['tx_cont_mode'] << 3) | (loc['rx_crc'] << 2) | current['symb_timout_lsb']
-        BOARD.chip_select(True)
-        print(val)
-        v = self.spi.xfer([REG.LORA.MODEM_CONFIG_2 | 0x80, val])[1]
-        BOARD.chip_select(False)
-        return v
+        config_modem = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_1)
+        config = config_modem | 0x01 if implicit_header_mode else config_modem & 0xfe
+        v = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_1 | 0x80, value=config)
 
     def set_spreading_factor(self, spreading_factor):
-        self.set_modem_config_2(spreading_factor=spreading_factor)
+        spreading_factor = min(max(spreading_factor, 6), 12)
+
+        config = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_2)
+        self.spi.transfer(address=REG.LORA.DETECT_OPTIMIZE | 0x80, value=0xc5 if spreading_factor == 6 else 0xc3)
+        self.spi.transfer(address=REG.LORA.DETECTION_THRESH | 0x80, value=0x0c if spreading_factor == 6 else 0x0a)
+
+        self.spi.transfer(address=REG.LORA.MODEM_CONFIG_2 | 0x80,
+                          value=(config & 0x0f) | ((spreading_factor << 4) & 0xf0))
 
     def set_rx_crc(self, rx_crc):
-        self.set_modem_config_2(rx_crc=rx_crc)
+        config_modem = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_2)
+        config = config_modem | 0x04 if rx_crc else config_modem & 0xfb
+        self.spi.transfer(address=REG.LORA.MODEM_CONFIG_2 | 0x80, value=config)
 
     def get_modem_config_3(self):
-        BOARD.chip_select(True)
-        val = self.spi.xfer([REG.LORA.MODEM_CONFIG_3, 0])[1]
-        BOARD.chip_select(False)
+
+        val = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_3)
+
         return dict(
-                low_data_rate_optim = val >> 3 & 0x01,
-                agc_auto_on = val >> 2 & 0x01
-            )
+            low_data_rate_optim=val >> 3 & 0x01,
+            agc_auto_on=val >> 2 & 0x01
+        )
 
     def set_modem_config_3(self, low_data_rate_optim=None, agc_auto_on=None):
         loc = locals()
         current = self.get_modem_config_3()
-        loc = {s: current[s] if loc[s] is None else loc[s] for s in loc}
-        val = (loc['low_data_rate_optim'] << 3) | (loc['agc_auto_on'] << 2)
-        BOARD.chip_select(True)
-        v = self.spi.xfer([REG.LORA.MODEM_CONFIG_3 | 0x80, val])[1]
-        BOARD.chip_select(False)
+
+        if low_data_rate_optim is not None:
+            current['low_data_rate_optim'] = low_data_rate_optim
+
+        if agc_auto_on is not None:
+            current['agc_auto_on'] = agc_auto_on
+
+        val = (current['low_data_rate_optim'] << 3) | (current['agc_auto_on'] << 2)
+
+        v = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_3 | 0x80, value=val)
+
         return v
 
     @setter(REG.LORA.INVERT_IQ)
@@ -719,39 +674,40 @@ class LoRa(object):
 
     def get_symb_timeout(self):
         SYMB_TIMEOUT_MSB = REG.LORA.MODEM_CONFIG_2
-        BOARD.chip_select(True)
-        msb, lsb = self.spi.xfer([SYMB_TIMEOUT_MSB, 0, 0])[1:]    # the MSB bits are stored in REG.LORA.MODEM_CONFIG_2
-        BOARD.chip_select(False)
+
+        msb, lsb = self.spi.transfer(address=SYMB_TIMEOUT_MSB)[:]  # the MSB bits are stored in REG.LORA.MODEM_CONFIG_2
+
         msb = msb & 0b11
         return lsb + 256 * msb
 
     def set_symb_timeout(self, timeout):
-        BOARD.chip_select(True)
-        bkup_reg_modem_config_2 = self.spi.xfer([REG.LORA.MODEM_CONFIG_2, 0])[1]
-        BOARD.chip_select(False)
-        msb = timeout >> 8 & 0b11    # bits 8-9
-        lsb = timeout - 256 * msb    # bits 0-7
-        reg_modem_config_2 = bkup_reg_modem_config_2 & 0xFC | msb    # bits 2-7 of bkup_reg_modem_config_2 ORed with the two msb bits
-        BOARD.chip_select(True)
-        old_msb = self.spi.xfer([REG.LORA.MODEM_CONFIG_2  | 0x80, reg_modem_config_2])[1] & 0x03
-        BOARD.chip_select(False)
-        BOARD.chip_select(True)
-        old_lsb = self.spi.xfer([REG.LORA.SYMB_TIMEOUT_LSB | 0x80, lsb])[1]
-        BOARD.chip_select(False)
+
+        bkup_reg_modem_config_2 = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_2)
+
+        msb = timeout >> 8 & 0b11  # bits 8-9
+        lsb = timeout - 256 * msb  # bits 0-7
+        reg_modem_config_2 = bkup_reg_modem_config_2 & 0xFC | msb  # bits 2-7 of bkup_reg_modem_config_2 ORed with the two msb bits
+
+        old_msb = self.spi.transfer(address=REG.LORA.MODEM_CONFIG_2 | 0x80, value=reg_modem_config_2) & 0x03
+
+        old_lsb = self.spi.transfer(address=REG.LORA.SYMB_TIMEOUT_LSB | 0x80, value=lsb)
+
         return old_lsb + 256 * old_msb
 
     def get_preamble(self):
-        BOARD.chip_select(True)
-        msb, lsb = self.spi.xfer([REG.LORA.PREAMBLE_MSB, 0, 0])[1:]
-        BOARD.chip_select(False)
+
+        msb = self.spi.transfer(address=REG.LORA.PREAMBLE_MSB)
+        lsb = self.spi.transfer(address=REG.LORA.PREAMBLE_LSB)
+
         return lsb + 256 * msb
 
     def set_preamble(self, preamble):
-        msb = preamble >> 8
-        lsb = preamble - msb * 256
-        BOARD.chip_select(True)
-        old_msb, old_lsb = self.spi.xfer([REG.LORA.PREAMBLE_MSB | 0x80, msb, lsb])[1:]
-        BOARD.chip_select(False)
+        msb = preamble >> 8 & 0xff
+        lsb = preamble >> 0 & 0xff
+
+        old_msb = self.spi.transfer(address=REG.LORA.PREAMBLE_MSB | 0x80, value=msb)
+        old_lsb = self.spi.transfer(address=REG.LORA.PREAMBLE_LSB | 0x80, value=lsb)
+
         return old_lsb + 256 * old_msb
 
     @getter(REG.LORA.PAYLOAD_LENGTH)
@@ -778,19 +734,10 @@ class LoRa(object):
     def set_hop_period(self, hop_period):
         return hop_period
 
-    def get_fei(self):
-        BOARD.chip_select(True)
-        msb, mid, lsb = self.spi.xfer([REG.LORA.FEI_MSB, 0, 0, 0])[1:]
-        BOARD.chip_select(False)
-        msb &= 0x0F
-        freq_error = lsb + 256 * (mid + 256 * msb)
-        return freq_error
-
     @getter(REG.LORA.DETECT_OPTIMIZE)
     def get_detect_optimize(self, val):
         """ Get LoRa detection optimize setting
         :return: detection optimize setting 0x03: SF7-12, 0x05: SF6
-
         """
         return val & 0b111
 
@@ -807,7 +754,6 @@ class LoRa(object):
     def get_detection_threshold(self, val):
         """ Get LoRa detection threshold setting
         :return: detection threshold 0x0A: SF7-12, 0x0C: SF6
-
         """
         return val
 
@@ -837,8 +783,8 @@ class LoRa(object):
         :rtype: list[int]
         """
 
-        self.dio0_mapping = mapping >> 6 & 0x03
-        return self.dio0_mapping
+        self.dio_mapping = [mapping >> 6 & 0x03, mapping >> 4 & 0x03, mapping >> 2 & 0x03, mapping >> 0 & 0x03]
+        return self.dio_mapping
 
     @setter(REG.LORA.DIO_MAPPING_1)
     def set_dio_mapping_1(self, mapping):
@@ -848,11 +794,11 @@ class LoRa(object):
         :return: New value of the register
         :rtype: int
         """
-        self.dio0_mapping = mapping >> 6 & 0x03
+        self.dio_mapping = [mapping >> 6 & 0x03, mapping >> 4 & 0x03, mapping >> 2 & 0x03, mapping >> 0 & 0x03]
         return mapping
 
     def get_dio_mapping(self):
-        return self.dio0_mapping
+        return self.dio_mapping
 
     def set_dio_mapping(self, mapping):
         """ Utility function that returns the list of current DIO mappings. Object variable dio_mapping will be set.
@@ -861,7 +807,8 @@ class LoRa(object):
         :return: New DIO mapping list
         :rtype: list[int]
         """
-        mapping_1 = (mapping & 0x03) << 6
+        mapping_1 = (mapping[0] & 0x03) << 6 | (mapping[1] & 0x03) << 4 | (mapping[2] & 0x3) << 2 | mapping[3] & 0x3
+        self.set_dio_mapping_1(mapping_1)
         return self.set_dio_mapping_1(mapping_1)
 
     @getter(REG.LORA.VERSION)
@@ -892,7 +839,7 @@ class LoRa(object):
         :param tcxo: 1=TCXO or 0=XTAL input setting
         :return: new TCXO or XTAL input setting
         """
-        return (tcxo >= 1) << 4 | 0x09      # bits 0-3 must be 0b1001
+        return (tcxo >= 1) << 4 | 0x09  # bits 0-3 must be 0b1001
 
     @getter(REG.LORA.PA_DAC)
     def get_pa_dac(self, pa_dac):
@@ -902,7 +849,7 @@ class LoRa(object):
         :return: True/False if +20dBm option on PA_BOOST on/off
         :rtype: bool
         """
-        pa_dac &= 0x07      # only bits 0-2
+        pa_dac &= 0x07  # only bits 0-2
         if pa_dac == 0x04:
             return False
         elif pa_dac == 0x07:
@@ -947,49 +894,25 @@ class LoRa(object):
         while (self.get_register(REG.FSK.IMAGE_CAL) & 0x20) == 0x20:
             pass
         # put back the saved parameters
-        self.set_mode(op_mode_bkup)
+        self.set_mode(MODE.FSK_STDBY)
         self.set_register(REG.LORA.PA_CONFIG, pa_config_bkup)
         self.set_freq(freq_bkup)
-
-    def dump_registers(self):
-        """ Returns a list of [reg_addr, reg_name, reg_value] tuples. Chip is put into mode SLEEP.
-        :return: List of [reg_addr, reg_name, reg_value] tuples
-        :rtype: list[tuple]
-        """
-        self.set_mode(MODE.SLEEP)
-        values = self.get_all_registers()
-        skip_set = set([REG.LORA.FIFO])
-        result_list = []
-        for i, s in REG.LORA.lookup.iteritems():
-            if i in skip_set:
-                continue
-            v = values[i]
-            result_list.append((i, s, v))
-        return result_list
 
     def get_register(self, register_address):
         """ Returns the value of the register
             we mask the address with 0x7F because we are on read mode -> MSB = 0
         :return: Value of the register
         """
-        BOARD.chip_select(True)
-        v = self.spi.xfer([register_address & 0x7F, 0])[1]
-        BOARD.chip_select(False)
+
+        v = self.spi.transfer(address=register_address & 0x7F)
+
         return v
 
     def set_register(self, register_address, val):
-        BOARD.chip_select(True)
-        v = self.spi.xfer([register_address | 0x80, val])[1]
-        BOARD.chip_select(False)
-        return v
 
-    def get_all_registers(self):
-        # read all registers
-        BOARD.chip_select(True)
-        reg = [0] + self.spi.xfer([1]+[0]*0x3E)[1:]
-        BOARD.chip_select(False)
-        self.mode = reg[1]
-        return reg
+        v = self.spi.transfer(address=register_address | 0x80, value=val)
+
+        return v
 
     def __del__(self):
         self.set_mode(MODE.SLEEP)
@@ -998,7 +921,7 @@ class LoRa(object):
 
     def __str__(self):
         # don't use __str__ while in any mode other that SLEEP or STDBY
-        assert(self.mode == MODE.SLEEP or self.mode == MODE.STDBY)
+        assert (self.mode == MODE.SLEEP or self.mode == MODE.STDBY)
 
         onoff = lambda i: 'ON' if i else 'OFF'
         f = self.get_freq()
@@ -1008,11 +931,11 @@ class LoRa(object):
         pa_config = self.get_pa_config(convert_dBm=True)
         ocp = self.get_ocp(convert_mA=True)
         lna = self.get_lna()
-        s =  "SX127x LoRa registers:\n"
-        s += " mode               %s\n" % MODE.lookup[self.get_mode()]
+        s = "SX127x LoRa registers:\n"
+        s += " mode               %s\n" % self.get_mode()
         s += " freq               %f MHz\n" % f
-        s += " coding_rate        %s\n" % CODING_RATE.lookup[cfg1['coding_rate']]
-        s += " bw                 %s\n" % BW.lookup[cfg1['bw']]
+        s += " coding_rate        %s\n" % cfg1['coding_rate']
+        s += " bw                 %s\n" % cfg1['bw']
         s += " spreading_factor   %s chips/symb\n" % (1 << cfg2['spreading_factor'])
         s += " implicit_hdr_mode  %s\n" % onoff(cfg1['implicit_header_mode'])
         s += " rx_payload_crc     %s\n" % onoff(cfg2['rx_crc'])
@@ -1020,7 +943,6 @@ class LoRa(object):
         s += " preamble           %d\n" % self.get_preamble()
         s += " low_data_rate_opti %s\n" % onoff(cfg3['low_data_rate_optim'])
         s += " agc_auto_on        %s\n" % onoff(cfg3['agc_auto_on'])
-        s += " symb_timeout       %s\n" % self.get_symb_timeout()
         s += " freq_hop_period    %s\n" % self.get_hop_period()
         s += " hop_channel        %s\n" % self.get_hop_channel()
         s += " payload_length     %s\n" % self.get_payload_length()
@@ -1028,31 +950,6 @@ class LoRa(object):
         s += " irq_flags_mask     %s\n" % self.get_irq_flags_mask()
         s += " irq_flags          %s\n" % self.get_irq_flags()
         s += " rx_nb_byte         %d\n" % self.get_rx_nb_bytes()
-        s += " rx_header_cnt      %d\n" % self.get_rx_header_cnt()
-        s += " rx_packet_cnt      %d\n" % self.get_rx_packet_cnt()
         s += " pkt_snr_value      %f\n" % self.get_pkt_snr_value()
-        s += " pkt_rssi_value     %d\n" % self.get_pkt_rssi_value()
-        s += " rssi_value         %d\n" % self.get_rssi_value()
-        s += " fei                %d\n" % self.get_fei()
-        s += " pa_select          %s\n" % PA_SELECT.lookup[pa_config['pa_select']]
-        s += " max_power          %f dBm\n" % pa_config['max_power']
-        s += " output_power       %f dBm\n" % pa_config['output_power']
-        s += " ocp                %s\n"     % onoff(ocp['ocp_on'])
-        s += " ocp_trim           %f mA\n"  % ocp['ocp_trim']
-        s += " lna_gain           %s\n" % GAIN.lookup[lna['lna_gain']]
-        s += " lna_boost_lf       %s\n" % bin(lna['lna_boost_lf'])
-        s += " lna_boost_hf       %s\n" % bin(lna['lna_boost_hf'])
-        s += " detect_optimize    %#02x\n" % self.get_detect_optimize()
-        s += " detection_thresh   %#02x\n" % self.get_detection_threshold()
-        s += " sync_word          %#02x\n" % self.get_sync_word()
-        s += " dio_mapping        %s\n" % self.get_dio_mapping()
-        s += " tcxo               %s\n" % ['XTAL', 'TCXO'][self.get_tcxo()]
-        s += " pa_dac             %s\n" % ['default', 'PA_BOOST'][self.get_pa_dac()]
-        s += " fifo_addr_ptr      %#02x\n" % self.get_fifo_addr_ptr()
-        s += " fifo_tx_base_addr  %#02x\n" % self.get_fifo_tx_base_addr()
-        s += " fifo_rx_base_addr  %#02x\n" % self.get_fifo_rx_base_addr()
-        s += " fifo_rx_curr_addr  %#02x\n" % self.get_fifo_rx_current_addr()
-        s += " fifo_rx_byte_addr  %#02x\n" % self.get_fifo_rx_byte_addr()
-        s += " status             %s\n" % self.get_modem_status()
-        s += " version            %#02x\n" % self.get_version()
+
         return s

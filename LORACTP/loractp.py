@@ -7,7 +7,6 @@ import sys
 import time
 import hashlib
 import socket
-import getmac
 
 from SX127x import board_config, constants, LoRa
 
@@ -45,7 +44,7 @@ class CTPLoraEndPoint:
         self.lora.set_mode(constants.MODE.STDBY)
         self.lora.set_pa_config(pa_select=1)
 
-        self.lora_mac = binascii.hexlify(bytes(getmac.get_mac_address().replace(":",""), encoding="utf-8"))
+        self.lora_mac = b'3a37343a'
         self.my_addr = self.lora_mac[8:]
         print(self.my_addr)
 
@@ -131,7 +130,7 @@ class CTPLoraEndPoint:
         timeout_time = 1
         estimated_rtt = -1
         dev_rtt = 1
-        lora_obj.set_timeout(5)
+        lora_obj.settimeout(5)
         # Loractp is stop and wait protocol
         seqnum = self.ZERO
         acknum = self.ONE
@@ -159,11 +158,11 @@ class CTPLoraEndPoint:
 
                 try:
                     time.sleep(3 - keep_trying)
+                    lora_obj.setblocking(True)
                     send_time = time.time()
-
                     lora_obj.send(packet)
                     if self.DEBUG: print("DEBUG >> Waiting for ack...")
-                    lora_obj.set_timeout(timeout_value)
+                    lora_obj.settimeout(timeout_value)
                     ack = lora_obj.recv()
                     recv_time = time.time()
                     if self.DEBUG: print("DEBUG >> Ack received!")
@@ -234,7 +233,7 @@ class CTPLoraEndPoint:
         last_check = 0
 
         next_acknum = self.ONE
-        lora_obj.set_timeout(5)
+        lora_obj.settimeout(5)
         if (snd_addr == self.ANY_ADDR) or (snd_addr == b''): SENDER_ADDR_KNOWN = False
         self.p_resend = 0  ###
 
@@ -244,8 +243,8 @@ class CTPLoraEndPoint:
 
         while True:
             try:
-                lora_obj.recv()
-                packet = bytes(lora_obj.payload, encoding="utf-8")
+                lora_obj.setblocking(True)
+                packet = lora_obj.recv()
                 if self.DEBUG: print("DEBUG >> packet received: ", packet)
                 inp_src_addr, inp_dst_addr, inp_seqnum, inp_acknum, is_ack, last_pkt, check, content = self.__unpack(
                     packet)
@@ -278,6 +277,7 @@ class CTPLoraEndPoint:
                                               last_pkt, b'')
                 if self.DEBUG: print("DEBUG >> Forwarded package", self.p_resend)  ###
                 self.p_resend = self.p_resend + 1  ###
+                lora_obj.setblocking(False)
                 lora_obj.send(ack_segment)
                 if self.DEBUG: print("DEBUG >> Sent ACK", ack_segment)
                 if last_pkt:
@@ -292,6 +292,7 @@ class CTPLoraEndPoint:
                                               last_pkt, b'')
                 self.conta = self.conta - 1
                 if self.DEBUG: print("DEBUG >> Forwarded package", self.p_resend)  ###
+                lora_obj.setblocking(False)
                 lora_obj.send(ack_segment)
                 if self.DEBUG: print("DEBUG >> re-sending ACK", ack_segment)
                 if last_pkt:
@@ -328,9 +329,5 @@ class CTPLoraEndPoint:
         rcvd_data, snd_addr = self._crecv(self.lora, self.lora_mac, addr)
         return rcvd_data, snd_addr
 
-    def test(self):
-        s = self.__make_pkt(self.my_addr, self.ANY_ADDR, self.ZERO, self.ONE, self.ITS_DATA_PKT, True, b'CONNECT')
-        self.lora.send(s)
-        self.lora.set_timeout(5)
-        self.lora.recv()
+
 

@@ -1,31 +1,8 @@
 """ Defines constants (modes, bandwidths, registers, etc.) needed by SX127x. """
-# -*- coding: utf-8 -*-
-
-# Copyright 2015-2018 Mayer Analytics Ltd.
-#
-# This file is part of pySX127x.
-#
-# pySX127x is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public
-# License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later
-# version.
-#
-# pySX127x is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
-# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
-# details.
-#
-# You can be released from the requirements of the license by obtaining a commercial license. Such a license is
-# mandatory as soon as you develop commercial activities involving pySX127x without disclosing the source code of your
-# own applications, or shipping pySX127x with a closed source product.
-#
-# You should have received a copy of the GNU General Public License along with pySX127.  If not, see
-# <http://www.gnu.org/licenses/>.
-
 
 def add_lookup(cls):
-    """ A decorator that adds a lookup dictionary to the class.
-        The lookup dictionary maps the codes back to the names. This is used for pretty-printing. """
-    varnames = filter(str.isupper, cls.__dict__.keys())
-    lookup = dict(map(lambda varname: (cls.__dict__.get(varname, None), varname), varnames))
+    varNames = filter(str.isupper, cls.__dict__.keys())
+    lookup = dict(map(lambda varname: (cls.__dict__.get(varname, None), varname), varNames))
     setattr(cls, 'lookup', lookup)
     return cls
 
@@ -145,6 +122,7 @@ class REG:
         MODEM_CONFIG_2     = 0x1E
         SYMB_TIMEOUT_LSB   = 0x1F
         PREAMBLE_MSB       = 0x20
+        PREAMBLE_LSB       = 0x21
         PAYLOAD_LENGTH     = 0x22
         MAX_PAYLOAD_LENGTH = 0x23
         HOP_PERIOD         = 0x24
