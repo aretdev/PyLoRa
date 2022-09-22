@@ -5,6 +5,9 @@ class BOARD:
     class MockC:
         pass
 
+    class LoRaTimeoutError(Exception):
+        pass
+
     DIO_PINS = [None, None, None, None]  # [DIO0, DIO1, DIO2, DIO3]
     CB_DIO0 = None
     CB_DIO1 = None

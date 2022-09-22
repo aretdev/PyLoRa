@@ -1,4 +1,5 @@
 """ Defines the BOARD class that contains the board pin mappings and RF module HF/LF info. """
+import math
 
 from machine import Pin, SPI, reset
 import time
@@ -91,7 +92,6 @@ class BOARD_ESP32(BOARD):
                 self.spi.write(bytes([address]))
                 self.spi.write_readinto(bytes([value]), response)
                 self.chip_select(False)
-
                 return int.from_bytes(response, 'big')
 
             new_spi.transfer = transfer
@@ -107,23 +107,17 @@ class BOARD_ESP32(BOARD):
     def add_event_dio0(self, value=None, blocked=None):
         if self.DIO_PINS[0] is not None:
             self.dio0_pin.detach_irq_trigger()
-            if blocked is True:
-                if value is None:
-                    chanel = self.dio0_pin.set_rising_handler(self.esp32_cb)
-                    while not self.pin_raised:
-                        time.sleep(0.05)
-                else:
-                    chanel = self.settimeout(value=value, callback=self.CB_DIO0)
+            self.pin_raised = False
+            chanel = None
+            if blocked is True and value is None or value is 0:
+                self.dio0_pin.set_rising_handler(self.esp32_cb)
+                while not self.pin_raised:
+                    pass
             else:
-                if value is not None:
+                if value is not None or value is not 0:
                     chanel = self.settimeout(value=value, callback=self.CB_DIO0)
                 else:
                     chanel = self.dio0_pin.set_rising_handler(self.esp32_cb)
-
-            if chanel is None and value is not None:
-                raise TimeoutError("DIO0 wasnt activated! expcetion thrown")
-            else:
-                self.CB_DIO0(None)
             return chanel
 
 
@@ -136,18 +130,20 @@ class BOARD_ESP32(BOARD):
         return value
 
     def settimeout(self, value, callback):
+        value = int(value * 1000) / 1000.0
         # If we adding a timeout , we clear possible events assigned to this pin (DIO0)
         self.dio0_pin.detach_irq_trigger()
         chanel = None
-        timer = value
+        timer = value*1000
+        print('tt', timer)
         while timer != 0:
             if self.dio0_pin.value() == 1:
                 chanel = 1
                 break
             timer = timer - 1
-            time.sleep(1)
+            time.sleep(0.001)
         if chanel is None:
-            raise TimeoutError("DIO0 wasnt activated! expcetion thrown")
+            raise BOARD.LoRaTimeoutError("Timeout Exception!")
         else:
             callback(None)
         return chanel

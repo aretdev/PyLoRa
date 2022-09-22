@@ -46,11 +46,13 @@ class BOARD_RPI(BOARD):
 
     def __init__(self, led_pin=LED, rst_pin=RST, nss_pin=NSS):
         super().__init__(led_pin, rst_pin, nss_pin)
+        GPIO.setwarnings(False)
 
     def setup_pin(self, pin_num, pin_value=GPIO.OUT):
         if pin_num is not None:
             mock_pin = BOARD.MockC()
             mock_pin.pin_num = pin_num
+            mock_pin.value = lambda: GPIO.input(pin_num)
             if pin_value == GPIO.OUT:
                 GPIO.setup(pin_num, pin_value)
                 mock_pin.low = lambda: GPIO.output(pin_num, 0)
@@ -95,7 +97,7 @@ class BOARD_RPI(BOARD):
         self.spi = spidev.SpiDev()
         self.spi.open(spi_bus, spi_cs)
         # SX127x can go up to 10MHz, pick half that to be safe
-        self.spi.max_speed_hz = 5000000
+        self.spi.max_speed_hz = 8000000
 
         return self.spi
 
@@ -107,15 +109,15 @@ class BOARD_RPI(BOARD):
                 if value is None:
                     chanel = GPIO.wait_for_edge(self.dio0_pin.pin_num, GPIO.RISING)
                 else:
-                    chanel = GPIO.wait_for_edge(self.dio0_pin.pin_num, GPIO.RISING, timeout=value*1000)
+                    chanel = self.settimeout(value=value, callback=self.CB_DIO0)
             else:
                 if value is not None:
-                    chanel = GPIO.wait_for_edge(self.dio0_pin.pin_num, GPIO.RISING, timeout=value*1000)
+                    chanel = self.settimeout(value=value, callback=self.CB_DIO0)
                 else:
                     chanel = GPIO.add_event_detect(self.dio0_pin.pin_num, GPIO.RISING, callback=self.CB_DIO0)
 
             if chanel is None and value is not None:
-                raise TimeoutError("DIO0 wasnt activated! expcetion thrown")
+                raise BOARD.LoRaTimeoutError("DIO0 wasnt activated! expcetion thrown")
             else:
                 self.CB_DIO0(None)
             return chanel
@@ -130,11 +132,15 @@ class BOARD_RPI(BOARD):
         return value
 
     def settimeout(self, value, callback):
+        value = int(value * 1000) / 1000.0
         # If we adding a timeout , we clear possible events assigned to this pin (DIO0)
         self.dio0_pin.detach_irq_trigger()
-        chanel = GPIO.wait_for_edge(self.dio0_pin.pin_num, GPIO.RISING, timeout=value*1000)
+        chanel = None
+        timer = int(value * 1000)
+        print('tt', timer)
+        chanel = GPIO.wait_for_edge(self.dio0_pin.pin_num, GPIO.RISING, timeout=timer)
         if chanel is None:
-            raise TimeoutError("DIO0 wasnt activated! expcetion thrown")
+            raise BOARD.LoRaTimeoutError("Timeout Exception!")
         else:
             callback(None)
         return chanel
