@@ -83,7 +83,8 @@ class LoRa:
         self.selected_chip.set_irq_callbacks(cb_dio0=self._dio0)
         # Get working class with util methods of SPI
         self.spi = self.selected_chip.get_spi()
-
+        self.set_implicit_header_mode(False)
+        self.set_invert_iq(0)
         self.payload = ""
         self.freq = freq
         self.verbose = verbose
@@ -127,7 +128,8 @@ class LoRa:
         self.get_dio_mapping_1()
 
         self.set_mode(MODE.STDBY)
-        self.set_pa_config(pa_select=1)
+        self.set_preamble(8)
+        self.set_pa_config(pa_select=1, output_power=14, max_power=14)
 
     # Overridable functions:
 
@@ -138,7 +140,10 @@ class LoRa:
         self.set_mode(MODE.RXCONT)
 
     def on_tx_done(self):
+        self.set_mode(MODE.STDBY)
+        print('fifo ', self.get_fifo_rx_current_addr())
         self.clear_irq_flags(TxDone=1)  # clear txdone IRQ flag
+
 
     def on_cad_done(self):
         pass
@@ -196,18 +201,21 @@ class LoRa:
         v = self.spi.transfer(address=REG.LORA.OP_MODE | 0x80, value=mode)
         return v
 
+
+
+
     def write_payload(self, payload):
         """ Get FIFO ready for TX: Set FifoAddrPtr to FifoTxBaseAddr. The transceiver is put into STDBY mode.
         :param payload: Payload to write (list)
         :return:    Written payload
         """
         payload_size = len(payload)
-        self.set_payload_length(payload_size)
         self.set_mode(MODE.STDBY)
+        self.set_payload_length(payload_size)
         base_addr = self.get_fifo_tx_base_addr()
         self.set_fifo_addr_ptr(base_addr)
         for i in range(payload_size):
-            self.spi.transfer(address=REG.LORA.FIFO | 0x80, value=payload[i])
+            x = self.spi.transfer(address=REG.LORA.FIFO | 0x80, value=payload[i])
 
         return payload
 

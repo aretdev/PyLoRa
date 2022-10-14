@@ -6,7 +6,6 @@ def add_lookup(cls):
     setattr(cls, 'lookup', lookup)
     return cls
 
-
 @add_lookup
 class MODE:
     SLEEP    = 0x80
@@ -78,7 +77,6 @@ class PA_RAMP:
     RAMP_12_us  = 14
     RAMP_10_us  = 15
 
-
 class MASK:
     class IRQ_FLAGS:
         RxTimeout           = 7
@@ -92,7 +90,6 @@ class MASK:
 
 
 class REG:
-
     @add_lookup
     class LORA:
         FIFO               = 0x00
